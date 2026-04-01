@@ -31,7 +31,7 @@ services:
         - "CMD"
         - "python"
         - "-c"
-        - "import grpc; ch = grpc.insecure_channel('localhost:50051'); ch.channel_ready_future().result(timeout=5)"
+        - "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=5)"
       interval: 10s
       timeout: 8s
       retries: 5
