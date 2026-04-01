@@ -1,6 +1,6 @@
 .PHONY: up down proto build logs clean
 
-PROTO_IMAGE := namely/protoc-all:1.51_4
+PROTO_IMAGE := namely/protoc-all:1.51_2
 PWD         := $(shell pwd)
 
 ## up: generate proto stubs, build images, and start the stack
@@ -19,7 +19,7 @@ proto:
 	  $(PROTO_IMAGE) \
 	  -f proto/inference.proto \
 	  -l go \
-	  -o gateway/gen \
+	  -o gateway/ \
 	  --go-module-prefix github.com/Kobe16/crucible/gateway
 	docker run --rm \
 	  -v "$(PWD):/defs" \

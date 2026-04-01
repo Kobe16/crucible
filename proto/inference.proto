@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package inference;
+
+option go_package = "github.com/Kobe16/crucible/gateway/gen/inference;inference";
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+enum ServingStatus {
+  SERVING_STATUS_UNKNOWN  = 0;
+  SERVING_STATUS_OK       = 1;
+  SERVING_STATUS_DEGRADED = 2; // model loaded but under strain
+  SERVING_STATUS_DOWN     = 3; // model failed to load or crashed
+}
+
+// ── Messages ──────────────────────────────────────────────────────────────────
+
+message InferenceRequest {
+  string              request_id = 1;
+  string              input      = 2;
+  map<string, string> parameters = 3; // e.g. "temperature":"0.7", "max_tokens":"256"
+}
+
+message InferenceResponse {
+  string request_id = 1;
+  string output     = 2;
+}
+
+message BatchRequest {
+  repeated InferenceRequest requests = 1;
+}
+
+message BatchResponse {
+  repeated InferenceResponse responses = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  ServingStatus status            = 1;
+  int32         in_flight_batches = 2;
+  float         gpu_utilization   = 3; // 0.0–1.0
+}
+
+// ── Service ───────────────────────────────────────────────────────────────────
+
+service InferenceService {
+  rpc RunInference (InferenceRequest) returns (InferenceResponse);
+  rpc HealthCheck  (HealthRequest)   returns (HealthResponse);
+}
