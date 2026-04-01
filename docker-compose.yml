@@ -1,0 +1,69 @@
+version: "3.9"
+
+networks:
+  crucible:
+    driver: bridge
+
+services:
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    image: crucible-worker:latest
+    container_name: crucible-worker
+    networks:
+      - crucible
+    ports:
+      - "50051:50051"
+    environment:
+      GRPC_PORT: "50051"
+      MAX_WORKERS: "4"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "1.0"
+          memory: 2G
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import grpc; ch = grpc.insecure_channel('localhost:50051'); grpc.channel_ready_future(ch).result(timeout=5)"
+      interval: 10s
+      timeout: 8s
+      retries: 5
+      start_period: 60s  # model loading takes ~30-45s
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    image: crucible-gateway:latest
+    container_name: crucible-gateway
+    networks:
+      - crucible
+    ports:
+      - "8080:8080"
+    environment:
+      WORKER_ADDR: "worker:50051"
+      HTTP_PORT: "8080"
+      LOG_LEVEL: "info"
+    depends_on:
+      worker:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped

@@ -1,0 +1,14 @@
+# CPU-only build. To switch to GPU (required for custom CUDA kernels):
+#   1. Remove the --extra-index-url line and +cpu suffixes below
+#   2. Pin to a CUDA-specific wheel: e.g. torch==2.3.1+cu121
+#   3. Change the Docker base image to nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
+#   4. Add `ninja` to this file (needed by torch.utils.cpp_extension)
+#   5. Declare GPU resources in docker-compose.yml
+--extra-index-url https://download.pytorch.org/whl/cpu
+grpcio==1.65.0
+grpcio-tools==1.65.0
+protobuf==5.27.2
+torch==2.3.1+cpu
+torchvision==0.18.1+cpu
+transformers==4.43.3
+numpy==1.26.4
