@@ -45,6 +45,7 @@ message HealthResponse {
 // ── Service ───────────────────────────────────────────────────────────────────
 
 service InferenceService {
-  rpc RunInference (InferenceRequest) returns (InferenceResponse);
-  rpc HealthCheck  (HealthRequest)   returns (HealthResponse);
+  rpc RunInference   (InferenceRequest) returns (InferenceResponse);
+  rpc BatchInference (BatchRequest)     returns (BatchResponse);
+  rpc HealthCheck    (HealthRequest)    returns (HealthResponse);
 }
