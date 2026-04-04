@@ -40,3 +40,6 @@ worker/gen/
 
 # Compiled binaries
 gateway/gateway
+
+# Local planning docs — kept off public repo
+plan.md
