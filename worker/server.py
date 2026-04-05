@@ -7,6 +7,7 @@ both use 'from proto import ...' without any sys.path manipulation.
 """
 
 import logging
+import signal
 import threading
 import time
 from concurrent import futures
@@ -232,6 +233,14 @@ def serve() -> None:
         runner.device,
         time.perf_counter() - t0,
     )
+    # Catch termination signals (SIGTERM/SIGINT) to gracefully shut down the server, 
+    # allowing 5 seconds for in-flight requests to finish.
+    def _handle_shutdown(signum: int, _frame: object) -> None:
+        log.info("Shutdown signal received (sig=%d), stopping server (grace=5s)...", signum)
+        server.stop(grace=5)
+
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+    signal.signal(signal.SIGINT, _handle_shutdown)
 
     server.wait_for_termination()
 
