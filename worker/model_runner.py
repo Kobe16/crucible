@@ -1,8 +1,17 @@
+from typing import TypedDict
+
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from config import MODEL_NAME, USE_CUSTOM_KERNEL
+
+
+class InferenceResult(TypedDict):
+    """A single classification result returned by :meth:`ModelRunner.predict`."""
+
+    label: str
+    score: float
 
 
 class ModelRunner:
@@ -49,19 +58,16 @@ class ModelRunner:
             )
         self._softmax = F.softmax
 
-    def predict(self, inputs: list[str]) -> list[dict]:
-        """Run inference on batch of text inputs, return predicted labels and scores.
-        
-        It uses the model to predict the sentiment of each input
-        text, returning the predicted label and its associated
-        confidence score. 
+    def predict(self, inputs: list[str]) -> list[InferenceResult]:
+        """Run inference on a batch of text inputs and return predicted labels and scores.
 
         Args:
             inputs (list[str]): List of input strings to classify.
-        
+
         Returns:
-            list[dict]: List of dictionaries with 'label' and
-                        'score' for each input.
+            list[InferenceResult]: One result per input, each with:
+                - ``label`` (str): Predicted class label (e.g. ``"POSITIVE"``).
+                - ``score`` (float): Confidence score in ``[0.0, 1.0]``.
         """
         encoded = self.tokenizer(
             inputs,

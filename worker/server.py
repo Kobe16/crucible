@@ -17,7 +17,7 @@ from proto import inference_pb2 as pb2
 from proto import inference_pb2_grpc as pb2_grpc
 
 from config import GRPC_PORT, MAX_WORKERS
-from model_runner import ModelRunner
+from model_runner import InferenceResult, ModelRunner
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +47,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
     def __init__(self) -> None:
         """Initialise the servicer in UNKNOWN state with no model loaded."""
         self._lock = threading.Lock()
-        self._status: int = pb2.SERVING_STATUS_UNKNOWN
+        self._status: int = pb2.SERVING_STATUS_UNKNOWN  # ServingStatus proto enum (int constant)
         self.runner: ModelRunner | None = None
         self._consecutive_errors: int = 0
 
@@ -156,7 +156,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         inputs: list[str] = [r.input for r in request.requests]
         t0 = time.perf_counter()
         try:
-            results: list[dict] = self.runner.predict(inputs)
+            results: list[InferenceResult] = self.runner.predict(inputs)
         except Exception as exc:
             self._on_inference_error()
             log.error("batch_inference failed", exc_info=True)
