@@ -13,6 +13,7 @@ import time
 from concurrent import futures
 
 import grpc
+from grpc_reflection.v1alpha import reflection
 from proto import inference_pb2 as pb2
 from proto import inference_pb2_grpc as pb2_grpc
 
@@ -212,6 +213,12 @@ def serve() -> None:
     servicer = InferenceServicer()
     pb2_grpc.add_InferenceServiceServicer_to_server(servicer, server)
     server.add_insecure_port(f"[::]:{GRPC_PORT}")
+
+    service_names = (
+        pb2.DESCRIPTOR.services_by_name["InferenceService"].full_name,
+        reflection.SERVICE_NAME,
+    )
+    reflection.enable_server_reflection(service_names, server)
 
     server.start()
     log.info("gRPC server started on port %d", GRPC_PORT)
