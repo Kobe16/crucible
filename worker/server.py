@@ -144,6 +144,13 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
             context.set_details("BatchRequest must contain at least one request.")
             return pb2.BatchResponse()
 
+        # Invariant: runner is set in set_ready() before status flips to OK,
+        # so this guard should never trigger under normal operation.
+        if self.runner is None:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details("Runner is unexpectedly uninitialized.")
+            return pb2.BatchResponse()
+
         # Extract inputs and run inference, handling any errors
         inputs: list[str] = [r.input for r in request.requests]
         t0 = time.perf_counter()
