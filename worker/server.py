@@ -53,7 +53,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
     # ------------------------------------------------------------------
 
     def set_loading(self) -> None:
-        """Transition to DOWN, signalling that model loading has started."""
+        """Transition to DOWN, signaling that model loading has started."""
         self._status = pb2.SERVING_STATUS_DOWN
 
     def set_ready(self, runner: ModelRunner) -> None:
@@ -75,12 +75,8 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         self._consecutive_errors = 0
         self._status = pb2.SERVING_STATUS_OK
 
-    def _on_inference_error(self, exc: Exception) -> None:
-        """Increment the consecutive error count and transition to DEGRADED if threshold is reached.
-
-        Args:
-            exc (Exception): The exception raised during inference (unused here, logged by caller).
-        """
+    def _on_inference_error(self) -> None:
+        """Increment error count and transition to DEGRADED if threshold is reached."""
         self._consecutive_errors += 1
         if self._consecutive_errors >= self._ERROR_THRESHOLD:
             self._status = pb2.SERVING_STATUS_DEGRADED
@@ -130,26 +126,26 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
                 input, with ``output`` formatted as ``"LABEL (score)"``.
                 Returns an empty BatchResponse with a gRPC error code set on
                 context if the model is not ready or inference fails.
-
-        Raises:
-            No exceptions are raised; errors are caught and reported via gRPC status codes.
         """
+        # Early exit if model isn't ready
         if self._status in _NOT_READY_STATUSES:
             context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details("Model is not ready.")
             return pb2.BatchResponse()
 
+        # Extract inputs and run inference, handling any errors
         inputs: list[str] = [r.input for r in request.requests]
         t0 = time.perf_counter()
         try:
             results: list[dict] = self.runner.predict(inputs)
         except Exception as exc:
-            self._on_inference_error(exc)
+            self._on_inference_error()
             log.error("batch_inference failed", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(exc))
             return pb2.BatchResponse()
 
+        # Handle successful inference and package results into response messages
         self._on_inference_success()
         latency_ms = (time.perf_counter() - t0) * 1000
         log.info("batch_inference batch_size=%d latency_ms=%.1f", len(inputs), latency_ms)
@@ -192,6 +188,7 @@ def serve() -> None:
             stopping the server and logging at CRITICAL level. The container
             will exit and Docker will restart it.
     """
+    # Start gRPC server & register servicer with thread pool executor for concurrent handling of requests.
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     servicer = InferenceServicer()
     pb2_grpc.add_InferenceServiceServicer_to_server(servicer, server)
@@ -200,6 +197,7 @@ def serve() -> None:
     server.start()
     log.info("gRPC server started on port %d", GRPC_PORT)
 
+    # Load model after starting server, raising exception to restart container
     log.info("Loading model...")
     servicer.set_loading()
     t0 = time.perf_counter()
