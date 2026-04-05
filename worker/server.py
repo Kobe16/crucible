@@ -139,6 +139,11 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
             context.set_details("Model is not ready.")
             return pb2.BatchResponse()
 
+        if not request.requests:
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_details("BatchRequest must contain at least one request.")
+            return pb2.BatchResponse()
+
         # Extract inputs and run inference, handling any errors
         inputs: list[str] = [r.input for r in request.requests]
         t0 = time.perf_counter()
