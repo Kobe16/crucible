@@ -15,7 +15,7 @@ import grpc
 from proto import inference_pb2 as pb2
 from proto import inference_pb2_grpc as pb2_grpc
 
-from config import GRPC_PORT
+from config import GRPC_PORT, MAX_WORKERS
 from model_runner import ModelRunner
 
 logging.basicConfig(
@@ -195,7 +195,7 @@ def serve() -> None:
             will exit and Docker will restart it.
     """
     # Start gRPC server & register servicer with thread pool executor for concurrent handling of requests.
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=MAX_WORKERS))
     servicer = InferenceServicer()
     pb2_grpc.add_InferenceServiceServicer_to_server(servicer, server)
     server.add_insecure_port(f"[::]:{GRPC_PORT}")
