@@ -7,6 +7,7 @@ both use 'from proto import ...' without any sys.path manipulation.
 """
 
 import logging
+import threading
 import time
 from concurrent import futures
 
@@ -44,6 +45,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
 
     def __init__(self) -> None:
         """Initialise the servicer in UNKNOWN state with no model loaded."""
+        self._lock = threading.Lock()
         self._status: int = pb2.SERVING_STATUS_UNKNOWN
         self.runner: ModelRunner | None = None
         self._consecutive_errors: int = 0
@@ -54,7 +56,8 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
 
     def set_loading(self) -> None:
         """Transition to DOWN, signaling that model loading has started."""
-        self._status = pb2.SERVING_STATUS_DOWN
+        with self._lock:
+            self._status = pb2.SERVING_STATUS_DOWN
 
     def set_ready(self, runner: ModelRunner) -> None:
         """Transition to OK once the model has finished loading.
@@ -62,9 +65,10 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         Args:
             runner (ModelRunner): The initialised model runner to use for inference.
         """
-        self.runner = runner
-        self._consecutive_errors = 0
-        self._status = pb2.SERVING_STATUS_OK
+        with self._lock:
+            self.runner = runner
+            self._consecutive_errors = 0
+            self._status = pb2.SERVING_STATUS_OK
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -72,14 +76,16 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
 
     def _on_inference_success(self) -> None:
         """Reset error count and restore OK status after a successful inference."""
-        self._consecutive_errors = 0
-        self._status = pb2.SERVING_STATUS_OK
+        with self._lock:
+            self._consecutive_errors = 0
+            self._status = pb2.SERVING_STATUS_OK
 
     def _on_inference_error(self) -> None:
         """Increment error count and transition to DEGRADED if threshold is reached."""
-        self._consecutive_errors += 1
-        if self._consecutive_errors >= self._ERROR_THRESHOLD:
-            self._status = pb2.SERVING_STATUS_DEGRADED
+        with self._lock:
+            self._consecutive_errors += 1
+            if self._consecutive_errors >= self._ERROR_THRESHOLD:
+                self._status = pb2.SERVING_STATUS_DEGRADED
 
     # ------------------------------------------------------------------
     # RPC handlers
