@@ -160,11 +160,11 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         t0 = time.perf_counter()
         try:
             results: list[InferenceResult] = runner.predict(inputs)
-        except Exception as exc:
+        except Exception:
             self._on_inference_error()
-            log.error("batch_inference failed", exc_info=True)
+            log.error("batch_inference failed", exc_info=True)  # full traceback in server logs via exc_info
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(str(exc))
+            context.set_details("Inference failed.")
             return pb2.BatchResponse()
 
         # Handle successful inference and package results into response messages
