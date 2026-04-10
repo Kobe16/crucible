@@ -1,3 +1,4 @@
+import logging
 from typing import TypedDict
 
 import torch
@@ -5,6 +6,8 @@ import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from config import MODEL_NAME, USE_CUSTOM_KERNEL
+
+log = logging.getLogger(__name__)
 
 
 class InferenceResult(TypedDict):
@@ -50,12 +53,18 @@ class ModelRunner:
         )
         self.id2label = self.model.config.id2label
 
-        # TODO: replace F.softmax with custom kernel for better performance on GPU. 
-        if USE_CUSTOM_KERNEL and torch.cuda.is_available():
-            raise RuntimeError(
-                "USE_CUSTOM_KERNEL=true but no custom kernel is installed yet. "
-                "Implement cuda_kernels/ in Sprint 5."
-            )
+        # TODO: replace F.softmax with custom kernel for better performance on GPU.
+        if USE_CUSTOM_KERNEL:
+            if not torch.cuda.is_available():
+                log.warning(
+                    "USE_CUSTOM_KERNEL=true but CUDA is unavailable; "
+                    "falling back to F.softmax"
+                )
+            else:
+                raise RuntimeError(
+                    "USE_CUSTOM_KERNEL=true but no custom kernel is installed yet. "
+                    "Implement cuda_kernels/ in Sprint 5."
+                )
         self._softmax = F.softmax
 
     def predict(self, inputs: list[str]) -> list[InferenceResult]:
