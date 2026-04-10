@@ -127,8 +127,18 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
                 Returns an empty BatchResponse with a gRPC error code set on
                 context if the model is not ready or inference fails.
         """
+        # Snapshot shared state under lock so reads are synchronised.
+        # Holding the lock through predict() would serialise all inference
+        # calls, so we copy to locals and release before doing any work.
+        # This is safe: runner is never unset once assigned, and status is
+        # only used as a gate check before we proceed (don't need to check 
+        # if runner valid in mid-inference).
+        with self._lock:
+            status = self._status
+            runner = self.runner
+
         # Early exit if model isn't ready
-        if self._status in _NOT_READY_STATUSES:
+        if status in _NOT_READY_STATUSES:
             context.set_code(grpc.StatusCode.UNAVAILABLE)
             context.set_details("Model is not ready.")
             return pb2.BatchResponse()
@@ -140,7 +150,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
 
         # Invariant: runner is set in set_ready() before status flips to OK,
         # so this guard should never trigger under normal operation.
-        if self.runner is None:
+        if runner is None:
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details("Runner is unexpectedly uninitialized.")
             return pb2.BatchResponse()
@@ -149,7 +159,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         inputs: list[str] = [r.input for r in request.requests]
         t0 = time.perf_counter()
         try:
-            results: list[InferenceResult] = self.runner.predict(inputs)
+            results: list[InferenceResult] = runner.predict(inputs)
         except Exception as exc:
             self._on_inference_error()
             log.error("batch_inference failed", exc_info=True)
@@ -185,4 +195,6 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         Returns:
             pb2.HealthResponse: Response containing the current ServingStatus.
         """
-        return pb2.HealthResponse(status=self._status)
+        with self._lock:
+            status = self._status
+        return pb2.HealthResponse(status=status)
