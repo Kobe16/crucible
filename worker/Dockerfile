@@ -12,9 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy generated gRPC stubs and application source
 COPY gen/ ./gen/
-COPY config.py .
-COPY model_runner.py .
-COPY server.py .
+COPY *.py .
 
 EXPOSE 50051
 
