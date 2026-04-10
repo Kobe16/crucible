@@ -107,7 +107,8 @@ crucible/
 │   └── cmd/gateway/
 │       └── main.go
 ├── worker/                   # Python gRPC inference server
-│   ├── server.py             # gRPC servicer (RunInference, BatchInference, HealthCheck)
+│   ├── server.py             # Entry point (serve(), signal handling, model loading)
+│   ├── servicer.py           # gRPC servicer (RunInference, BatchInference, HealthCheck)
 │   ├── model_runner.py       # DistilBERT model loading and batch inference
 │   ├── config.py             # Env var parsing
 │   ├── requirements.txt
