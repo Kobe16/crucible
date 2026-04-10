@@ -82,10 +82,10 @@ class ModelRunner:
         with torch.inference_mode():
             logits = self.model(**encoded).logits
 
-        # Convert logits -> probabilities -> top class index & confidence score
+        # Convert logits -> probabilities -> top scores & corresponding label indices for each input
         probs = self._softmax(logits, dim=-1)
-        indices = torch.argmax(probs, dim=-1).tolist()
-        scores = probs[range(len(inputs)), indices].tolist()
+        scores, indices = torch.max(probs, dim=-1)
+        scores, indices = scores.tolist(), indices.tolist()
 
         return [
             {"label": self.id2label[idx], "score": score}
