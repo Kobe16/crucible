@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
@@ -8,6 +8,7 @@ RUN go mod download
 # Copy generated gRPC stubs and application source
 COPY gen/ ./gen/
 COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /gateway ./cmd/gateway
 

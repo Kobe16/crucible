@@ -9,12 +9,17 @@ both use 'from proto import ...' without any sys.path manipulation.
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING
 
 import grpc
+from grpc_health.v1 import health_pb2 as health_pb2
 from proto import inference_pb2 as pb2
 from proto import inference_pb2_grpc as pb2_grpc
 
 from model_runner import InferenceResult, ModelRunner
+
+if TYPE_CHECKING:
+    from grpc_health.v1 import health as grpc_health
 
 log = logging.getLogger("worker.server")
 
@@ -37,12 +42,16 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
 
     _ERROR_THRESHOLD: int = 3
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        health_servicer: "grpc_health.HealthServicer | None" = None,
+    ) -> None:
         """Initialise the servicer in UNKNOWN state with no model loaded."""
         self._lock = threading.Lock()
         self._status: int = pb2.SERVING_STATUS_UNKNOWN  # ServingStatus proto enum (int constant)
         self.runner: ModelRunner | None = None
         self._consecutive_errors: int = 0
+        self._health_servicer = health_servicer
 
     # ------------------------------------------------------------------
     # State transitions (called from serve())
@@ -52,6 +61,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         """Transition to DOWN, signaling that model loading has started."""
         with self._lock:
             self._status = pb2.SERVING_STATUS_DOWN
+            self._sync_health()
 
     def set_ready(self, runner: ModelRunner) -> None:
         """Transition to OK once the model has finished loading.
@@ -63,6 +73,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
             self.runner = runner
             self._consecutive_errors = 0
             self._status = pb2.SERVING_STATUS_OK
+            self._sync_health()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -73,6 +84,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         with self._lock:
             self._consecutive_errors = 0
             self._status = pb2.SERVING_STATUS_OK
+            self._sync_health()
 
     def _on_inference_error(self) -> None:
         """Increment error count and transition to DEGRADED if threshold is reached."""
@@ -80,6 +92,18 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
             self._consecutive_errors += 1
             if self._consecutive_errors >= self._ERROR_THRESHOLD:
                 self._status = pb2.SERVING_STATUS_DEGRADED
+                self._sync_health()
+
+    def _sync_health(self) -> None:
+        """Sync grpc.health.v1 status with current ServingStatus. Must hold self._lock."""
+        if self._health_servicer is None:
+            return
+        if self._status in (pb2.SERVING_STATUS_OK, pb2.SERVING_STATUS_DEGRADED):
+            status = health_pb2.HealthCheckResponse.SERVING
+        else:
+            status = health_pb2.HealthCheckResponse.NOT_SERVING
+        self._health_servicer.set("", status)
+        self._health_servicer.set("inference.InferenceService", status)
 
     # ------------------------------------------------------------------
     # RPC handlers
@@ -181,20 +205,20 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         ]
         return pb2.BatchResponse(responses=responses)
 
-    def HealthCheck(
+    def GetWorkerStatus(
         self,
-        request: pb2.HealthRequest,
+        request: pb2.WorkerStatusRequest,
         context: grpc.ServicerContext,
-    ) -> pb2.HealthResponse:
+    ) -> pb2.WorkerStatusResponse:
         """Return the current serving status.
 
         Args:
-            request (pb2.HealthRequest): Empty health check request.
+            request (pb2.WorkerStatusRequest): Empty worker status request.
             context (grpc.ServicerContext): gRPC context (unused).
 
         Returns:
-            pb2.HealthResponse: Response containing the current ServingStatus.
+            pb2.WorkerStatusResponse: Response containing the current ServingStatus.
         """
         with self._lock:
             status = self._status
-        return pb2.HealthResponse(status=status)
+        return pb2.WorkerStatusResponse(status=status)

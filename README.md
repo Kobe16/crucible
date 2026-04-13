@@ -40,6 +40,9 @@ make up
 # 3. Check health
 curl http://localhost:8080/health
 
+# 4. Check status
+curl http://localhost:8080/status
+
 # 4. Run inference
 curl -X POST http://localhost:8080/predict \
   -H "Content-Type: application/json" \
@@ -65,8 +68,11 @@ The worker has [gRPC server reflection](https://grpc.github.io/grpc/core/md_doc_
 # Install grpcurl (macOS)
 brew install grpcurl
 
-# Health check — returns DOWN during model load (~30-45s), then OK
-grpcurl -plaintext localhost:50051 inference.InferenceService/HealthCheck
+# Standard health check (grpc.health.v1) — NOT_SERVING during model load, then SERVING
+grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
+
+# Application-level worker status
+grpcurl -plaintext localhost:50051 inference.InferenceService/GetWorkerStatus
 
 # Single inference
 grpcurl -plaintext \
@@ -104,11 +110,15 @@ crucible/
 ├── proto/                    # gRPC service definition (inference.proto)
 ├── gateway/                  # Go HTTP→gRPC gateway
 │   ├── go.mod
-│   └── cmd/gateway/
-│       └── main.go
+│   ├── cmd/gateway/
+│   │   └── main.go           # Entry point: wire config → client → handler → HTTP server
+│   └── internal/
+│       ├── config/config.go  # Env var loading (WORKER_ADDR, HTTP_PORT, LOG_LEVEL)
+│       ├── worker/client.go  # gRPC connection wrapper (RunInference, CheckHealth, GetWorkerStatus)
+│       └── handler/handler.go # HTTP handlers (POST /predict, GET /health, GET /status)
 ├── worker/                   # Python gRPC inference server
 │   ├── server.py             # Entry point (serve(), signal handling, model loading)
-│   ├── servicer.py           # gRPC servicer (RunInference, BatchInference, HealthCheck)
+│   ├── servicer.py           # gRPC servicer (RunInference, BatchInference, GetWorkerStatus)
 │   ├── model_runner.py       # DistilBERT model loading and batch inference
 │   ├── config.py             # Env var parsing
 │   ├── requirements.txt
