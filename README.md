@@ -40,6 +40,9 @@ make up
 # 3. Check health
 curl http://localhost:8080/health
 
+# 4. Check status
+curl http://localhost:8080/status
+
 # 4. Run inference
 curl -X POST http://localhost:8080/predict \
   -H "Content-Type: application/json" \

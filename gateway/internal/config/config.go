@@ -9,10 +9,10 @@ type Config struct {
 	LogLevel   string
 }
 
-// Load reads environemnt variables and returns a populated Config struct.
+// Load reads environment variables and returns a populated Config struct.
 func Load() Config {
 	return Config{
-		WorkerAddr: getEnv("WORKER_ADDR", "localhost:50051"),
+		WorkerAddr: getEnv("WORKER_ADDR", "worker:50051"),
 		HTTPPort:   getEnv("HTTP_PORT", "8080"),
 		LogLevel:   getEnv("LOG_LEVEL", "info"),
 	}

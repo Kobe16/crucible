@@ -1,6 +1,6 @@
 module github.com/Kobe16/crucible/gateway
 
-go 1.24.0
+go 1.24
 
 require (
 	google.golang.org/grpc v1.80.0
