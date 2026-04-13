@@ -8,6 +8,7 @@ RUN go mod download
 # Copy generated gRPC stubs and application source
 COPY gen/ ./gen/
 COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /gateway ./cmd/gateway
 
