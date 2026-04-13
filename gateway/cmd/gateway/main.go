@@ -25,7 +25,7 @@ func main() {
 
 	// Startup health check — log but don't crash if worker isn't ready yet
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	resp, err := client.HealthCheck(ctx)
+	resp, err := client.CheckHealth(ctx)
 	cancel()
 	if err != nil {
 		log.Printf("WARNING: worker health check failed: %v", err)
@@ -39,6 +39,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /predict", h.Predict)
 	mux.HandleFunc("GET /health", h.Health)
+	mux.HandleFunc("GET /status", h.Status)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,

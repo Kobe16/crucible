@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc/codes"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
-	"github.com/Kobe16/crucible/gateway/gen/inference"
 	"github.com/Kobe16/crucible/gateway/internal/worker"
 )
 
@@ -40,6 +40,13 @@ type predictResponse struct {
 // healthResponse is the JSON response for a health check request.
 type healthResponse struct {
 	Status string `json:"status"`
+}
+
+// statusResponse is the JSON response for the detailed worker status endpoint.
+type statusResponse struct {
+	Status          string  `json:"status"`
+	InFlightBatches int32   `json:"in_flight_batches"`
+	GpuUtilization  float32 `json:"gpu_utilization"`
 }
 
 // errorResponse is the JSON response for an error.
@@ -86,27 +93,41 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Health handles GET /health requests, forwarding them to the worker and returning the response.
+// Health handles GET /health requests using the standard grpc.health.v1 protocol.
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
-	// Grab context with 5-sec timeout (to prevent hanging) and call worker client
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	resp, err := h.client.HealthCheck(ctx)
+	resp, err := h.client.CheckHealth(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, healthResponse{Status: "unavailable"})
 		return
 	}
 
-	// Map the worker's health status to an appropriate HTTP response.
-	switch resp.Status {
-	case inference.ServingStatus_SERVING_STATUS_OK:
+	if resp.Status == healthpb.HealthCheckResponse_SERVING {
 		writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
-	case inference.ServingStatus_SERVING_STATUS_DEGRADED:
-		writeJSON(w, http.StatusOK, healthResponse{Status: "degraded"})
-	default:
-		writeJSON(w, http.StatusServiceUnavailable, healthResponse{Status: resp.Status.String()})
+	} else {
+		writeJSON(w, http.StatusServiceUnavailable, healthResponse{Status: "unavailable"})
 	}
+}
+
+// Status handles GET /status requests, returning detailed worker status including
+// the application-level ServingStatus and metrics (in_flight_batches, gpu_utilization).
+func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	resp, err := h.client.GetWorkerStatus(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "worker unreachable"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, statusResponse{
+		Status:          resp.Status.String(),
+		InFlightBatches: resp.InFlightBatches,
+		GpuUtilization:  resp.GpuUtilization,
+	})
 }
 
 // mapGRPCError converts a gRPC error to an HTTP status code and a gRPC code for logging.

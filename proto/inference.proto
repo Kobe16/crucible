@@ -34,12 +34,12 @@ message BatchResponse {
   repeated InferenceResponse responses = 1;
 }
 
-message HealthRequest {}
+message WorkerStatusRequest {}
 
-message HealthResponse {
+message WorkerStatusResponse {
   ServingStatus status            = 1;
-  int32         in_flight_batches = 2;
-  float         gpu_utilization   = 3; // 0.0–1.0
+  int32         in_flight_batches = 2; // reserved for future use
+  float         gpu_utilization   = 3; // 0.0–1.0, reserved for future use
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -47,5 +47,5 @@ message HealthResponse {
 service InferenceService {
   rpc RunInference   (InferenceRequest) returns (InferenceResponse);
   rpc BatchInference (BatchRequest)     returns (BatchResponse);
-  rpc HealthCheck    (HealthRequest)    returns (HealthResponse);
+  rpc GetWorkerStatus (WorkerStatusRequest) returns (WorkerStatusResponse);
 }

@@ -11,6 +11,9 @@ import time
 from concurrent import futures
 
 import grpc
+from grpc_health.v1 import health as grpc_health
+from grpc_health.v1 import health_pb2 as health_pb2
+from grpc_health.v1 import health_pb2_grpc as health_pb2_grpc
 from grpc_reflection.v1alpha import reflection
 from proto import inference_pb2 as pb2
 from proto import inference_pb2_grpc as pb2_grpc
@@ -40,12 +43,23 @@ def serve() -> None:
     """
     # Start gRPC server & register servicer with thread pool executor for concurrent handling of requests.
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=MAX_WORKERS))
-    servicer = InferenceServicer()
+
+    # Standard grpc.health.v1 health servicer — starts as NOT_SERVING until model loads.
+    health_servicer = grpc_health.HealthServicer()
+    health_servicer.set("", health_pb2.HealthCheckResponse.NOT_SERVING)
+    health_servicer.set(
+        "inference.InferenceService",
+        health_pb2.HealthCheckResponse.NOT_SERVING,
+    )
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+
+    servicer = InferenceServicer(health_servicer=health_servicer)
     pb2_grpc.add_InferenceServiceServicer_to_server(servicer, server)
     server.add_insecure_port(f"[::]:{GRPC_PORT}")
 
     service_names = (
         pb2.DESCRIPTOR.services_by_name["InferenceService"].full_name,
+        "grpc.health.v1.Health",
         reflection.SERVICE_NAME,
     )
     reflection.enable_server_reflection(service_names, server)
