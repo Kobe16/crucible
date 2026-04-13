@@ -1,13 +1,13 @@
-import logging
 from typing import TypedDict
 
+import structlog
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from config import MODEL_NAME, USE_CUSTOM_KERNEL
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 
 class InferenceResult(TypedDict):
@@ -56,10 +56,7 @@ class ModelRunner:
         # TODO: replace F.softmax with custom kernel for better performance on GPU.
         if USE_CUSTOM_KERNEL:
             if not torch.cuda.is_available():
-                log.warning(
-                    "USE_CUSTOM_KERNEL=true but CUDA is unavailable; "
-                    "falling back to F.softmax"
-                )
+                log.warning("custom_kernel_unavailable", reason="CUDA not available, falling back to F.softmax")
             else:
                 raise RuntimeError(
                     "USE_CUSTOM_KERNEL=true but no custom kernel is installed yet. "

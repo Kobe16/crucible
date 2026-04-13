@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -15,6 +15,40 @@ import (
 
 	"github.com/Kobe16/crucible/gateway/internal/worker"
 )
+
+// requestIDKey is a context key for the per-request ID set by LoggingMiddleware.
+type requestIDKey struct{}
+
+// responseWriter wraps http.ResponseWriter to capture the status code written by handlers.
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+// LoggingMiddleware generates a request_id for every inbound request, stores it in
+// the context, and logs a single structured http_request entry after the handler returns.
+func LoggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := newRequestID()
+		ctx := context.WithValue(r.Context(), requestIDKey{}, requestID)
+		r = r.WithContext(ctx)
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(rw, r)
+		slog.InfoContext(ctx, "http_request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rw.status,
+			"latency_ms", time.Since(start).Milliseconds(),
+			"request_id", requestID,
+		)
+	})
+}
 
 // Handler is an HTTP handler for inference requests and health checks (it wraps a worker.Client).
 type Handler struct {
@@ -70,8 +104,8 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get unique request ID, grab context, and call worker client
-	requestID := newRequestID()
+	// Retrieve the request ID set by LoggingMiddleware (falls back to empty string if middleware not used).
+	requestID, _ := r.Context().Value(requestIDKey{}).(string)
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -81,7 +115,7 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 	// If worker failed, convert gRPC error to HTTP error, log to server, send the error to the user, and stop
 	if err != nil {
 		code, httpStatus := mapGRPCError(err)
-		log.Printf("Infer error (grpc=%s): %v", code, err)
+		slog.ErrorContext(r.Context(), "infer_error", "grpc_code", code.String(), "error", err, "request_id", requestID)
 		writeJSON(w, httpStatus, errorResponse{Error: code.String()})
 		return
 	}
@@ -165,6 +199,6 @@ func writeJSON(w http.ResponseWriter, statusCode int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("ERROR: failed to encode JSON response: %v", err)
+		slog.Error("json_encode_error", "error", err)
 	}
 }

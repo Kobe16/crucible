@@ -16,6 +16,9 @@ services:
     environment:
       GRPC_PORT: "50051"
       MAX_WORKERS: "4"
+      MODEL_NAME: "distilbert-base-uncased-finetuned-sst-2-english"
+      USE_CUSTOM_KERNEL: "false"
+      LOG_LEVEL: "INFO"
     deploy:
       resources:
         limits:
@@ -45,7 +48,7 @@ services:
     environment:
       WORKER_ADDR: "worker:50051"
       HTTP_PORT: "8080"
-      LOG_LEVEL: "info"
+      LOG_LEVEL: "INFO"
     depends_on:
       worker:
         condition: service_healthy

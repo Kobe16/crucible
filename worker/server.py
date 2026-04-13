@@ -11,6 +11,7 @@ import time
 from concurrent import futures
 
 import grpc
+import structlog
 from grpc_health.v1 import health as grpc_health
 from grpc_health.v1 import health_pb2 as health_pb2
 from grpc_health.v1 import health_pb2_grpc as health_pb2_grpc
@@ -18,15 +19,30 @@ from grpc_reflection.v1alpha import reflection
 from proto import inference_pb2 as pb2
 from proto import inference_pb2_grpc as pb2_grpc
 
-from config import GRPC_PORT, MAX_WORKERS
+from config import GRPC_PORT, LOG_LEVEL, MAX_WORKERS
 from model_runner import ModelRunner
 from servicer import InferenceServicer
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
-log = logging.getLogger("worker.server")
+
+def _configure_logging() -> None:
+    level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
+    # Keep stdlib basicConfig so gRPC's internal logs still work.
+    logging.basicConfig(level=level, format="%(message)s")
+    structlog.configure(
+        processors=[
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.dict_tracebacks,
+            structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(level),
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+
+_configure_logging()
+log = structlog.get_logger()
 
 
 def serve() -> None:
@@ -65,29 +81,25 @@ def serve() -> None:
     reflection.enable_server_reflection(service_names, server)
 
     server.start()
-    log.info("gRPC server started on port %d", GRPC_PORT)
+    log.info("grpc_server_started", port=GRPC_PORT)
 
     # Load model after starting server, raising exception to restart container
-    log.info("Loading model...")
+    log.info("model_loading")
     servicer.set_loading()
     t0 = time.perf_counter()
     try:
         runner = ModelRunner()
     except Exception:
-        log.critical("Model load failed — shutting down", exc_info=True)
+        log.critical("model_load_failed", exc_info=True)
         server.stop(grace=0)
         raise
 
     servicer.set_ready(runner)
-    log.info(
-        "Model ready (device=%s, load_time=%.1fs)",
-        runner.device,
-        time.perf_counter() - t0,
-    )
+    log.info("model_ready", device=runner.device, load_time_s=round(time.perf_counter() - t0, 1))
     # Catch termination signals (SIGTERM/SIGINT) to gracefully shut down the server,
     # allowing 5 seconds for in-flight requests to finish.
     def _handle_shutdown(signum: int, _frame: object) -> None:
-        log.info("Shutdown signal received (sig=%d), stopping server (grace=5s)...", signum)
+        log.info("shutdown_signal", sig=signum)
         server.stop(grace=5)
 
     signal.signal(signal.SIGTERM, _handle_shutdown)
