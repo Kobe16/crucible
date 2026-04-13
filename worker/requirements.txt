@@ -13,3 +13,4 @@ protobuf==5.27.2
 torch==2.6.0+cpu
 transformers==4.43.3
 numpy==1.26.4
+structlog==24.4.0

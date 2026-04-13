@@ -6,12 +6,12 @@ PYTHONPATH=/app/gen set in the Dockerfile, so the generated stubs and this modul
 both use 'from proto import ...' without any sys.path manipulation.
 """
 
-import logging
 import threading
 import time
 from typing import TYPE_CHECKING
 
 import grpc
+import structlog
 from grpc_health.v1 import health_pb2 as health_pb2
 from proto import inference_pb2 as pb2
 from proto import inference_pb2_grpc as pb2_grpc
@@ -21,7 +21,7 @@ from model_runner import InferenceResult, ModelRunner
 if TYPE_CHECKING:
     from grpc_health.v1 import health as grpc_health
 
-log = logging.getLogger("worker.server")
+log = structlog.get_logger()
 
 _NOT_READY_STATUSES: tuple[int, ...] = (
     pb2.SERVING_STATUS_UNKNOWN,
@@ -181,12 +181,14 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
 
         # Extract inputs and run inference, handling any errors
         inputs: list[str] = [r.input for r in request.requests]
+        request_ids: list[str] = [r.request_id for r in request.requests]
+        bound_log = log.bind(request_ids=request_ids)
         t0 = time.perf_counter()
         try:
             results: list[InferenceResult] = runner.predict(inputs)
         except Exception:
             self._on_inference_error()
-            log.error("batch_inference failed", exc_info=True)  # full traceback in server logs via exc_info
+            bound_log.error("batch_inference_failed", exc_info=True)
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details("Inference failed.")
             return pb2.BatchResponse()
@@ -194,7 +196,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         # Handle successful inference and package results into response messages
         self._on_inference_success()
         latency_ms = (time.perf_counter() - t0) * 1000
-        log.info("batch_inference batch_size=%d latency_ms=%.1f", len(inputs), latency_ms)
+        bound_log.info("batch_inference", batch_size=len(inputs), latency_ms=round(latency_ms, 1))
 
         responses: list[pb2.InferenceResponse] = [
             pb2.InferenceResponse(

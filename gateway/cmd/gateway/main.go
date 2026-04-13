@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,9 +18,17 @@ import (
 func main() {
 	cfg := config.Load()
 
+	// Initialize slog with JSON output. Level defaults to INFO if LOG_LEVEL is unrecognized.
+	var level slog.Level
+	if err := level.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
+		level = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
+
 	client, err := worker.NewClient(cfg.WorkerAddr)
 	if err != nil {
-		log.Fatalf("Failed to create gRPC client: %v", err)
+		slog.Error("grpc_client_init_failed", "error", err)
+		os.Exit(1)
 	}
 
 	// Startup health check — log but don't crash if worker isn't ready yet
@@ -28,9 +36,9 @@ func main() {
 	resp, err := client.CheckHealth(ctx)
 	cancel()
 	if err != nil {
-		log.Printf("WARNING: worker health check failed: %v", err)
+		slog.Warn("worker_health_check_failed", "error", err)
 	} else {
-		log.Printf("Worker health: %s", resp.Status)
+		slog.Info("worker_health_check", "status", resp.Status)
 	}
 
 	// Setup HTTP server with Router (mux) that dispatches to handler functions for each endpoint
@@ -43,34 +51,35 @@ func main() {
 
 	server := &http.Server{
 		Addr:    ":" + cfg.HTTPPort,
-		Handler: mux,
+		Handler: handler.LoggingMiddleware(mux),
 	}
 
 	// Start HTTP server is a goroutine so we can listen for shutdown signals in the main thread
 	go func() {
-		log.Printf("HTTP server listening on :%s", cfg.HTTPPort)
+		slog.Info("http_server_listening", "port", cfg.HTTPPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
+			slog.Error("http_server_error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	// In main thread, listen for OS signals to gracefully shutdown the server and gRPC client
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)	// SIGTERM for Kubernetes, SIGINT for Ctrl+C
-	sig := <-sigCh	// Pause here till we receive a shutdown signal
-	log.Printf("Received %s, shutting down", sig)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT) // SIGTERM for Kubernetes, SIGINT for Ctrl+C
+	sig := <-sigCh                                        // Pause here till we receive a shutdown signal
+	slog.Info("shutdown_signal", "signal", sig.String())
 
 	// Create context with timeout for graceful shutdown of HTTP server and gRPC client
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("HTTP shutdown error: %v", err)
+		slog.Error("http_shutdown_error", "error", err)
 	}
 
 	if err := client.Close(); err != nil {
-		log.Printf("gRPC close error: %v", err)
+		slog.Error("grpc_close_error", "error", err)
 	}
 
-	log.Println("Gateway stopped")
+	slog.Info("gateway_stopped")
 }
