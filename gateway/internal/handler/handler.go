@@ -70,7 +70,7 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get unique request ID, grab context with 5-sec timeout (to prevent hanging), and call worker client
+	// Get unique request ID, grab context, and call worker client
 	requestID := newRequestID()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -164,5 +164,7 @@ func newRequestID() string {
 func writeJSON(w http.ResponseWriter, statusCode int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("ERROR: failed to encode JSON response: %v", err)
+	}
 }
