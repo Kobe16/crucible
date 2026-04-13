@@ -27,7 +27,10 @@ from servicer import InferenceServicer
 def _configure_logging() -> None:
     level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
     # Keep stdlib basicConfig so gRPC's internal logs still work.
-    logging.basicConfig(level=level, format="%(message)s")
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     structlog.configure(
         processors=[
             structlog.processors.add_log_level,
