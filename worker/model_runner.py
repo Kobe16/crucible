@@ -3,7 +3,7 @@ from typing import TypedDict
 import structlog
 import torch
 import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from config import MODEL_NAME, USE_CUSTOM_KERNEL
 

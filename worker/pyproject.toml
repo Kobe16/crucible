@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "gen"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = ["gen/"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
