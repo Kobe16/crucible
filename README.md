@@ -1,5 +1,7 @@
 # crucible
 
+[![CI](https://github.com/Kobe16/crucible/actions/workflows/ci.yml/badge.svg)](https://github.com/Kobe16/crucible/actions/workflows/ci.yml)
+
 Distributed GPU Inference Engine — a Go API gateway that forwards inference requests to a Python/PyTorch worker via gRPC.
 
 ## Architecture
