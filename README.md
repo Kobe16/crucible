@@ -60,6 +60,27 @@ make clean   # remove generated stubs + containers + images
 make proto   # regenerate proto stubs
 ```
 
+### Running tests and linters
+
+**Go** (from `gateway/`):
+
+```bash
+cd gateway
+go test -v -race ./...    # run tests with race detector
+go vet ./...              # static analysis
+test -z "$(gofmt -l .)"  # formatting check
+```
+
+**Python** (from `worker/`):
+
+```bash
+cd worker
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -v tests/          # run tests
+ruff check .              # linter
+```
+
 **GPU migration**: see comments in `worker/requirements.txt` for the steps required to switch from CPU to CUDA.
 
 ## Testing the Worker Directly
