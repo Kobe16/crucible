@@ -155,7 +155,7 @@ class InferenceServicer(pb2_grpc.InferenceServiceServicer):
         # Holding the lock through predict() would serialise all inference
         # calls, so we copy to locals and release before doing any work.
         # This is safe: runner is never unset once assigned, and status is
-        # only used as a gate check before we proceed (don't need to check 
+        # only used as a gate check before we proceed (don't need to check
         # if runner valid in mid-inference).
         with self._lock:
             status = self._status

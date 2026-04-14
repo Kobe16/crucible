@@ -13,7 +13,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
-	"github.com/Kobe16/crucible/gateway/internal/worker"
+	pb "github.com/Kobe16/crucible/gateway/gen/inference"
 )
 
 // requestIDKey is a context key for the per-request ID set by LoggingMiddleware.
@@ -50,12 +50,19 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// Handler is an HTTP handler for inference requests and health checks (it wraps a worker.Client).
-type Handler struct {
-	client *worker.Client
+// WorkerClient abstracts the gRPC worker so handlers can be tested with a mock.
+type WorkerClient interface {
+	Infer(ctx context.Context, requestID, input string, params map[string]string) (string, error)
+	CheckHealth(ctx context.Context) (*healthpb.HealthCheckResponse, error)
+	GetWorkerStatus(ctx context.Context) (*pb.WorkerStatusResponse, error)
 }
 
-func New(client *worker.Client) *Handler {
+// Handler is an HTTP handler for inference requests and health checks (it wraps a WorkerClient).
+type Handler struct {
+	client WorkerClient
+}
+
+func New(client WorkerClient) *Handler {
 	return &Handler{client: client}
 }
 

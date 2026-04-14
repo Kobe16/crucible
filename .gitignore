@@ -7,7 +7,7 @@
 *.test
 *.out
 /vendor/
-gateway/gen/
+# gateway/gen/ — committed for CI (no proto toolchain needed)
 # go.sum is intentionally NOT ignored — must be committed
 
 # Python
@@ -24,7 +24,7 @@ dist/
 venv/
 env/
 .env
-worker/gen/
+# worker/gen/ — committed for CI (no proto toolchain needed)
 
 # HuggingFace cache
 .cache/
