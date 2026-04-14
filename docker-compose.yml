@@ -18,8 +18,10 @@ services:
       MAX_WORKERS: "4"
       MODEL_NAME: "distilbert-base-uncased-finetuned-sst-2-english"
       USE_CUSTOM_KERNEL: "false"
-      # LOG_LEVEL: "INFO"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HF_HOME: "/root/.cache/huggingface"
+    volumes:
+      - model-cache:/root/.cache/huggingface
     deploy:
       resources:
         limits:
@@ -49,7 +51,6 @@ services:
     environment:
       WORKER_ADDR: "worker:50051"
       HTTP_PORT: "8080"
-      # LOG_LEVEL: "INFO"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       worker:
@@ -66,3 +67,6 @@ services:
         max-size: "10m"
         max-file: "3"
     restart: unless-stopped
+
+volumes:
+  model-cache:

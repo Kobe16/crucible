@@ -112,6 +112,24 @@ grpcurl -plaintext \
 grpcurl -plaintext localhost:50051 list inference.InferenceService
 ```
 
+## First-run note
+
+On first startup, the worker downloads the model weights
+(`distilbert-base-uncased-finetuned-sst-2-english`, ~250MB) from
+HuggingFace and caches them in a Docker volume (`model-cache`).
+
+Observed startup times on an M2 MacBook Air:
+- **First run** (download + load): ~15.6s for the worker container to become healthy
+- **Subsequent runs** (cached): ~5.6s for the worker container to become healthy
+
+The `start_period: 60s` healthcheck setting leaves generous headroom for
+slower connections on first run.
+
+To clear the cache and force a re-download:
+​```bash
+docker volume rm crucible_model-cache
+​```
+
 ## Configuration
 
 Both services are configured via environment variables, which can be overridden in `docker-compose.yml` or passed directly when running containers locally.
