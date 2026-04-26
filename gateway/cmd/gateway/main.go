@@ -11,7 +11,7 @@ import (
 
 	"github.com/Kobe16/crucible/gateway/internal/config"
 	"github.com/Kobe16/crucible/gateway/internal/handler"
-	"github.com/Kobe16/crucible/gateway/internal/worker"
+	"github.com/Kobe16/crucible/gateway/internal/inference"
 )
 
 // Main entry point for the gateway application. Initializes configuration, sets up gRPC client and HTTP server, and handles graceful shutdown.
@@ -25,7 +25,7 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
 
-	client, err := worker.NewClient(cfg.WorkerAddr)
+	client, err := inference.NewClient(cfg.WorkerAddr)
 	if err != nil {
 		slog.Error("grpc_client_init_failed", "error", err)
 		os.Exit(1)
