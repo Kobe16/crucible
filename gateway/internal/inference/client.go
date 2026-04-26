@@ -31,6 +31,11 @@ func NewClient(addr string) (*Client, error) {
 	}, nil
 }
 
+// BatchInference forwards a batch inference request to worker through a gRPC stub, and returns the output
+func (c *Client) BatchInference(ctx context.Context, req *pb.BatchRequest) (*pb.BatchResponse, error) {
+	return c.stub.BatchInference(ctx, req)
+}
+
 // Infer creates a batch inference request, sends it to the worker, and returns the output.
 func (c *Client) Infer(ctx context.Context, requestID, input string, params map[string]string) (string, error) {
 	req := &pb.BatchRequest{
