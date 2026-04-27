@@ -42,7 +42,12 @@ func NewBatcher(maxBatchSize int, batchTimeout time.Duration, queueDepth int, in
 // Submit enqueues a PendingRequest and blocks until the batcher returns a
 // Result or the request's context is cancelled.
 func (b *Batcher) Submit(req *PendingRequest) Result {
-	b.queue <- req
+	// Don't enqueue request if its context is already cancelled
+	select {
+	case b.queue <- req:
+	case <-req.Ctx.Done():
+		return Result{Err: req.Ctx.Err()}
+	}
 
 	select {
 	case result := <-req.ResponseChan:
@@ -123,25 +128,25 @@ func (b *Batcher) flush(ctx context.Context, batch []*PendingRequest) {
 	}
 
 	// Build map of pending requests keyed by RequestID for fast lookup
-	pendingById := make(map[string]*PendingRequest, len(batch))
+	pendingByID := make(map[string]*PendingRequest, len(batch))
 	for _, req := range batch {
-		pendingById[req.RequestID] = req
+		pendingByID[req.RequestID] = req
 	}
 
 	// Delete requests from map as you return their responses
 	for _, response := range resp.Responses {
-		if req, ok := pendingById[response.RequestId]; ok {
+		if req, ok := pendingByID[response.RequestId]; ok {
 			req.ResponseChan <- Result{Output: response.Output}
-			delete(pendingById, response.RequestId)
+			delete(pendingByID, response.RequestId)
 		} else {
 			b.logger.Warn("unknown_response_id", "request_id", response.RequestId)
 		}
 	}
 
 	// For requests that didn't get a response, send an error
-	for _, req := range pendingById {
+	for _, req := range pendingByID {
 		req.ResponseChan <- Result{
-			Err: fmt.Errorf("Worker did not return a response for request %s", req.RequestID),
+			Err: fmt.Errorf("worker did not return a response for request %s", req.RequestID),
 		}
 	}
 }
