@@ -36,30 +36,6 @@ func (c *Client) BatchInference(ctx context.Context, req *pb.BatchRequest) (*pb.
 	return c.stub.BatchInference(ctx, req)
 }
 
-// Infer creates a batch inference request, sends it to the worker, and returns the output.
-func (c *Client) Infer(ctx context.Context, requestID, input string, params map[string]string) (string, error) {
-	req := &pb.BatchRequest{
-		Requests: []*pb.InferenceRequest{
-			{
-				RequestId:  requestID,
-				Input:      input,
-				Parameters: params,
-			},
-		},
-	}
-
-	resp, err := c.stub.BatchInference(ctx, req)
-	if err != nil {
-		return "", err
-	}
-
-	if len(resp.Responses) == 0 {
-		return "", fmt.Errorf("worker returned empty batch response")
-	}
-
-	return resp.Responses[0].Output, nil
-}
-
 // CheckHealth calls the standard grpc.health.v1 Health/Check RPC.
 func (c *Client) CheckHealth(ctx context.Context) (*healthpb.HealthCheckResponse, error) {
 	return c.healthStub.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})

@@ -17,28 +17,20 @@ import (
 	"github.com/Kobe16/crucible/gateway/internal/batcher"
 )
 
-// mockWorkerClient implements WorkerClient for testing.
-type mockWorkerClient struct {
-	inferFn           func(ctx context.Context, requestID, input string, params map[string]string) (string, error)
+// mockStatusProbe implements StatusProbe for testing.
+type mockStatusProbe struct {
 	checkHealthFn     func(ctx context.Context) (*healthpb.HealthCheckResponse, error)
 	getWorkerStatusFn func(ctx context.Context) (*pb.WorkerStatusResponse, error)
 }
 
-func (m *mockWorkerClient) Infer(ctx context.Context, requestID, input string, params map[string]string) (string, error) {
-	if m.inferFn != nil {
-		return m.inferFn(ctx, requestID, input, params)
-	}
-	return "", nil
-}
-
-func (m *mockWorkerClient) CheckHealth(ctx context.Context) (*healthpb.HealthCheckResponse, error) {
+func (m *mockStatusProbe) CheckHealth(ctx context.Context) (*healthpb.HealthCheckResponse, error) {
 	if m.checkHealthFn != nil {
 		return m.checkHealthFn(ctx)
 	}
 	return nil, nil
 }
 
-func (m *mockWorkerClient) GetWorkerStatus(ctx context.Context) (*pb.WorkerStatusResponse, error) {
+func (m *mockStatusProbe) GetWorkerStatus(ctx context.Context) (*pb.WorkerStatusResponse, error) {
 	if m.getWorkerStatusFn != nil {
 		return m.getWorkerStatusFn(ctx)
 	}
@@ -160,7 +152,7 @@ func TestPredict(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := New(&mockWorkerClient{}, &mockPredictor{submitFn: tt.submitFn})
+			h := New(&mockStatusProbe{}, &mockPredictor{submitFn: tt.submitFn})
 
 			req := httptest.NewRequest(http.MethodPost, "/predict", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
@@ -214,7 +206,7 @@ func TestHealth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockWorkerClient{checkHealthFn: tt.healthFn}
+			mock := &mockStatusProbe{checkHealthFn: tt.healthFn}
 			h := New(mock, &mockPredictor{})
 
 			req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -264,7 +256,7 @@ func TestStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockWorkerClient{getWorkerStatusFn: tt.statusFn}
+			mock := &mockStatusProbe{getWorkerStatusFn: tt.statusFn}
 			h := New(mock, &mockPredictor{})
 
 			req := httptest.NewRequest(http.MethodGet, "/status", nil)
@@ -353,7 +345,7 @@ func TestNewRequestID(t *testing.T) {
 // TestStatusResponseJSON tests the JSON encoding of the status response from the /status endpoint.
 func TestStatusResponseJSON(t *testing.T) {
 	// Verify the status endpoint returns correct numeric fields
-	mock := &mockWorkerClient{
+	mock := &mockStatusProbe{
 		getWorkerStatusFn: func(_ context.Context) (*pb.WorkerStatusResponse, error) {
 			return &pb.WorkerStatusResponse{
 				Status:          pb.ServingStatus_SERVING_STATUS_OK,

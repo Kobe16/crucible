@@ -52,9 +52,9 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// WorkerClient abstracts the gRPC worker so handlers can be tested with a mock.
-type WorkerClient interface {
-	Infer(ctx context.Context, requestID, input string, params map[string]string) (string, error)
+// StatusProbe is the worker-status dependency for the /health and /status
+// endpoints. *inference.Client satisfies this interface.
+type StatusProbe interface {
 	CheckHealth(ctx context.Context) (*healthpb.HealthCheckResponse, error)
 	GetWorkerStatus(ctx context.Context) (*pb.WorkerStatusResponse, error)
 }
@@ -67,12 +67,12 @@ type Predictor interface {
 
 // Handler is an HTTP handler for inference requests and health checks.
 type Handler struct {
-	client    WorkerClient
+	probe     StatusProbe
 	predictor Predictor
 }
 
-func New(client WorkerClient, predictor Predictor) *Handler {
-	return &Handler{client: client, predictor: predictor}
+func New(probe StatusProbe, predictor Predictor) *Handler {
+	return &Handler{probe: probe, predictor: predictor}
 }
 
 // predictRequest is the expected JSON body for a prediction request.
@@ -165,7 +165,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	resp, err := h.client.CheckHealth(ctx)
+	resp, err := h.probe.CheckHealth(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, healthResponse{Status: "unavailable"})
 		return
@@ -184,7 +184,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	resp, err := h.client.GetWorkerStatus(ctx)
+	resp, err := h.probe.GetWorkerStatus(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "worker unreachable"})
 		return
