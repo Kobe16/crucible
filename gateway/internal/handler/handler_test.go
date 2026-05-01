@@ -57,20 +57,22 @@ func (m *mockPredictor) Submit(req *batcher.PendingRequest) batcher.Result {
 	return batcher.Result{}
 }
 
-// TestPredict tests the Predict handler (/predict endpoint) with various scenarios, including valid requests, error handling, and parameter passing.
+// TestPredict tests the Predict handler (/predict endpoint) by driving the
+// prediction path through a mock Predictor. Validation errors short-circuit
+// before Submit, so those test cases leave submitFn nil.
 func TestPredict(t *testing.T) {
 	tests := []struct {
 		name       string
 		body       string
-		inferFn    func(ctx context.Context, requestID, input string, params map[string]string) (string, error)
+		submitFn   func(req *batcher.PendingRequest) batcher.Result
 		wantStatus int
 		wantBody   string // substring match
 	}{
 		{
 			name: "valid request",
 			body: `{"input":"hello world"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "POSITIVE (0.9500)", nil
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Output: "POSITIVE (0.9500)"}
 			},
 			wantStatus: http.StatusOK,
 			wantBody:   `"output":"POSITIVE (0.9500)"`,
@@ -78,11 +80,11 @@ func TestPredict(t *testing.T) {
 		{
 			name: "valid request with parameters",
 			body: `{"input":"hello","parameters":{"temp":"0.7"}}`,
-			inferFn: func(_ context.Context, _, _ string, params map[string]string) (string, error) {
-				if params["temp"] != "0.7" {
-					t.Errorf("expected temp=0.7, got %s", params["temp"])
+			submitFn: func(req *batcher.PendingRequest) batcher.Result {
+				if req.Parameters["temp"] != "0.7" {
+					t.Errorf("expected temp=0.7, got %s", req.Parameters["temp"])
 				}
-				return "ok", nil
+				return batcher.Result{Output: "ok"}
 			},
 			wantStatus: http.StatusOK,
 			wantBody:   `"output":"ok"`,
@@ -108,41 +110,57 @@ func TestPredict(t *testing.T) {
 		{
 			name: "worker unavailable",
 			body: `{"input":"test"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "", status.Error(codes.Unavailable, "connection refused")
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: status.Error(codes.Unavailable, "connection refused")}
 			},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			name: "worker internal error",
 			body: `{"input":"test"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "", status.Error(codes.Internal, "inference failed")
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: status.Error(codes.Internal, "inference failed")}
 			},
 			wantStatus: http.StatusBadGateway,
 		},
 		{
-			name: "worker deadline exceeded",
+			name: "worker deadline exceeded (gRPC)",
 			body: `{"input":"test"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "", status.Error(codes.DeadlineExceeded, "timeout")
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: status.Error(codes.DeadlineExceeded, "timeout")}
 			},
 			wantStatus: http.StatusGatewayTimeout,
 		},
 		{
 			name: "worker invalid argument",
 			body: `{"input":"test"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "", status.Error(codes.InvalidArgument, "bad input")
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: status.Error(codes.InvalidArgument, "bad input")}
 			},
 			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "request context deadline exceeded",
+			body: `{"input":"test"}`,
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: context.DeadlineExceeded}
+			},
+			wantStatus: http.StatusGatewayTimeout,
+			wantBody:   `"request timed out"`,
+		},
+		{
+			name: "missing response from worker",
+			body: `{"input":"test"}`,
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: errors.New("worker did not return a response for request abc")}
+			},
+			wantStatus: http.StatusInternalServerError,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockWorkerClient{inferFn: tt.inferFn}
-			h := New(mock, &mockPredictor{})
+			h := New(&mockWorkerClient{}, &mockPredictor{submitFn: tt.submitFn})
 
 			req := httptest.NewRequest(http.MethodPost, "/predict", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
