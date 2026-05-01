@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -103,7 +104,7 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-// Predict handles POST /predict requests, forwarding them to the worker and returning the response.
+// Predict handles POST /predict requests, forwarding them to the batcher and returning the response.
 func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 
@@ -125,21 +126,38 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	output, err := h.client.Infer(ctx, requestID, req.Input, req.Parameters)
+	// Build request and send it to batcher
+	pending := &batcher.PendingRequest{
+		RequestID:    requestID,
+		Input:        req.Input,
+		Parameters:   req.Parameters,
+		ResponseChan: make(chan batcher.Result, 1),
+		ArrivalTime:  time.Now(),
+		Ctx:          ctx,
+	}
 
-	// If worker failed, convert gRPC error to HTTP error, log to server, send the error to the user, and stop
-	if err != nil {
-		code, httpStatus := mapGRPCError(err)
-		slog.ErrorContext(r.Context(), "infer_error", "grpc_code", code.String(), "error", err, "request_id", requestID)
-		writeJSON(w, httpStatus, errorResponse{Error: code.String()})
+	result := h.predictor.Submit(pending)
+
+	// Request succeeded
+	if result.Err == nil {
+		writeJSON(w, http.StatusOK, predictResponse{
+			RequestID: requestID,
+			Output:    result.Output,
+		})
 		return
 	}
 
-	// If worker succeeded, return the output to the user with the request ID for tracing.
-	writeJSON(w, http.StatusOK, predictResponse{
-		RequestID: requestID,
-		Output:    output,
-	})
+	// Context error occurred (i.e, 10s timeout fired, HTTP client disconnected)
+	if errors.Is(result.Err, context.DeadlineExceeded) || errors.Is(result.Err, context.Canceled) {
+		slog.ErrorContext(r.Context(), "request_timeout", "error", result.Err, "request_id", requestID)
+		writeJSON(w, http.StatusGatewayTimeout, errorResponse{Error: "request timed out"})
+		return
+	}
+
+	// Everything else (gRPC error, missing-response error, etc.)
+	code, httpStatus := mapGRPCError(result.Err)
+	slog.ErrorContext(r.Context(), "predict_error", "grpc_code", code.String(), "error", result.Err, "request_id", requestID)
+	writeJSON(w, httpStatus, errorResponse{Error: code.String()})
 }
 
 // Health handles GET /health requests using the standard grpc.health.v1 protocol.
