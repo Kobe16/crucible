@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Kobe16/crucible/gateway/internal/batcher"
 	"github.com/Kobe16/crucible/gateway/internal/config"
 	"github.com/Kobe16/crucible/gateway/internal/handler"
 	"github.com/Kobe16/crucible/gateway/internal/inference"
@@ -41,10 +42,18 @@ func main() {
 		slog.Info("worker_health_check", "status", resp.Status)
 	}
 
-	// Setup HTTP server with Router (mux) that dispatches to handler functions for each endpoint
-	// TODO(step F): construct the real batcher and pass it here.
-	h := handler.New(client, nil)
+	// Construct the batcher and start its goroutine. Run() returns when its
+	// ctx is cancelled (during shutdown).
+	batcherCtx, batcherCancel := context.WithCancel(context.Background())
+	b := batcher.NewBatcher(cfg.MaxBatchSize, cfg.BatchTimeout, cfg.QueueDepth, client, slog.Default())
+	batcherDone := make(chan struct{})
+	go func() {
+		b.Run(batcherCtx)
+		close(batcherDone)
+	}()
 
+	// Setup HTTP server. inference.Client satisfies handler.StatusProbe; the batcher satisfies handler.Predictor.
+	h := handler.New(client, b)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /predict", h.Predict)
 	mux.HandleFunc("GET /health", h.Health)
@@ -55,7 +64,7 @@ func main() {
 		Handler: handler.LoggingMiddleware(mux),
 	}
 
-	// Start HTTP server is a goroutine so we can listen for shutdown signals in the main thread
+	// Start HTTP server in a goroutine so we can listen for shutdown signals in the main thread
 	go func() {
 		slog.Info("http_server_listening", "port", cfg.HTTPPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -64,19 +73,25 @@ func main() {
 		}
 	}()
 
-	// In main thread, listen for OS signals to gracefully shutdown the server and gRPC client
+	// In main thread, listen for OS signals to gracefully shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT) // SIGTERM for Kubernetes, SIGINT for Ctrl+C
 	sig := <-sigCh                                        // Pause here till we receive a shutdown signal
 	slog.Info("shutdown_signal", "signal", sig.String())
 
-	// Create context with timeout for graceful shutdown of HTTP server and gRPC client
+	// Graceful shutdown sequence:
+	// 1. HTTP server: stop accepting new connections, drain in-flight requests
+	// 2. Batcher: cancel its ctx so Run returns; wait for it
+	// 3. gRPC client: close the connection
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http_shutdown_error", "error", err)
 	}
+
+	batcherCancel()
+	<-batcherDone
 
 	if err := client.Close(); err != nil {
 		slog.Error("grpc_close_error", "error", err)
