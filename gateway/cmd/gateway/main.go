@@ -42,7 +42,8 @@ func main() {
 	}
 
 	// Setup HTTP server with Router (mux) that dispatches to handler functions for each endpoint
-	h := handler.New(client)
+	// TODO(step F): construct the real batcher and pass it here.
+	h := handler.New(client, nil)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /predict", h.Predict)

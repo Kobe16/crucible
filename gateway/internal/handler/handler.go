@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/Kobe16/crucible/gateway/gen/inference"
+	"github.com/Kobe16/crucible/gateway/internal/batcher"
 )
 
 // requestIDKey is a context key for the per-request ID set by LoggingMiddleware.
@@ -57,13 +58,20 @@ type WorkerClient interface {
 	GetWorkerStatus(ctx context.Context) (*pb.WorkerStatusResponse, error)
 }
 
-// Handler is an HTTP handler for inference requests and health checks (it wraps a WorkerClient).
-type Handler struct {
-	client WorkerClient
+// Predictor routes a prediction request and returns its result.
+// *batcher.Batcher satisfies this interface.
+type Predictor interface {
+	Submit(req *batcher.PendingRequest) batcher.Result
 }
 
-func New(client WorkerClient) *Handler {
-	return &Handler{client: client}
+// Handler is an HTTP handler for inference requests and health checks.
+type Handler struct {
+	client    WorkerClient
+	predictor Predictor
+}
+
+func New(client WorkerClient, predictor Predictor) *Handler {
+	return &Handler{client: client, predictor: predictor}
 }
 
 // predictRequest is the expected JSON body for a prediction request.

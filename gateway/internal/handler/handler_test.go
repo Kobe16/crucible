@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/Kobe16/crucible/gateway/gen/inference"
+	"github.com/Kobe16/crucible/gateway/internal/batcher"
 )
 
 // mockWorkerClient implements WorkerClient for testing.
@@ -42,6 +43,18 @@ func (m *mockWorkerClient) GetWorkerStatus(ctx context.Context) (*pb.WorkerStatu
 		return m.getWorkerStatusFn(ctx)
 	}
 	return nil, nil
+}
+
+// mockPredictor implements Predictor for testing.
+type mockPredictor struct {
+	submitFn func(req *batcher.PendingRequest) batcher.Result
+}
+
+func (m *mockPredictor) Submit(req *batcher.PendingRequest) batcher.Result {
+	if m.submitFn != nil {
+		return m.submitFn(req)
+	}
+	return batcher.Result{}
 }
 
 // TestPredict tests the Predict handler (/predict endpoint) with various scenarios, including valid requests, error handling, and parameter passing.
@@ -129,7 +142,7 @@ func TestPredict(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockWorkerClient{inferFn: tt.inferFn}
-			h := New(mock)
+			h := New(mock, &mockPredictor{})
 
 			req := httptest.NewRequest(http.MethodPost, "/predict", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
@@ -184,7 +197,7 @@ func TestHealth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockWorkerClient{checkHealthFn: tt.healthFn}
-			h := New(mock)
+			h := New(mock, &mockPredictor{})
 
 			req := httptest.NewRequest(http.MethodGet, "/health", nil)
 			rec := httptest.NewRecorder()
@@ -234,7 +247,7 @@ func TestStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockWorkerClient{getWorkerStatusFn: tt.statusFn}
-			h := New(mock)
+			h := New(mock, &mockPredictor{})
 
 			req := httptest.NewRequest(http.MethodGet, "/status", nil)
 			rec := httptest.NewRecorder()
@@ -331,7 +344,7 @@ func TestStatusResponseJSON(t *testing.T) {
 			}, nil
 		},
 	}
-	h := New(mock)
+	h := New(mock, &mockPredictor{})
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
 	rec := httptest.NewRecorder()
 	h.Status(rec, req)
