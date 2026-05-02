@@ -42,7 +42,7 @@ func NewBatcher(maxBatchSize int, batchTimeout time.Duration, queueDepth int, in
 // Submit enqueues a PendingRequest and blocks until the batcher returns a
 // Result or the request's context is cancelled.
 func (b *Batcher) Submit(req *PendingRequest) Result {
-	// Don't enqueue request if its context is already cancelled
+	// Don't enqueue request if its context is already cancelled (from 10s handler timeout, or client disconnect)
 	select {
 	case b.queue <- req:
 	case <-req.Ctx.Done():
