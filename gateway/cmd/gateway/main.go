@@ -45,7 +45,7 @@ func main() {
 	// Construct the batcher and start its goroutine. Run() returns when its
 	// ctx is cancelled (during shutdown).
 	batcherCtx, batcherCancel := context.WithCancel(context.Background())
-	b := batcher.NewBatcher(cfg.MaxBatchSize, cfg.BatchTimeout, cfg.QueueDepth, client, slog.Default())
+	b := batcher.NewBatcher(cfg.MaxBatchSize, cfg.BatchTimeout, cfg.InferenceDeadline, cfg.QueueDepth, client, slog.Default())
 	batcherDone := make(chan struct{})
 	go func() {
 		b.Run(batcherCtx)

@@ -91,7 +91,7 @@ func submitAll(b *Batcher, reqs []*PendingRequest) <-chan outcome {
 // batch reaches maxBatchSize, without waiting for the timeout.
 func TestBatcher_FlushesOnSize(t *testing.T) {
 	fake := &fakeInferrer{}
-	b := NewBatcher(3, time.Hour, 100, fake, quietLogger())
+	b := NewBatcher(3, time.Hour, 2*time.Second, 100, fake, quietLogger())
 	startBatcher(t, b)
 
 	reqs := []*PendingRequest{
@@ -121,7 +121,7 @@ func TestBatcher_FlushesOnSize(t *testing.T) {
 func TestBatcher_FlushesOnTimeout(t *testing.T) {
 	fake := &fakeInferrer{}
 	timeout := 30 * time.Millisecond
-	b := NewBatcher(10, timeout, 100, fake, quietLogger())
+	b := NewBatcher(10, timeout, 2*time.Second, 100, fake, quietLogger())
 	startBatcher(t, b)
 
 	reqs := []*PendingRequest{
@@ -150,7 +150,7 @@ func TestBatcher_FlushesOnTimeout(t *testing.T) {
 func TestBatcher_NoFireOnEmptyQueue(t *testing.T) {
 	fake := &fakeInferrer{}
 	timeout := 20 * time.Millisecond
-	b := NewBatcher(10, timeout, 100, fake, quietLogger())
+	b := NewBatcher(10, timeout, 2*time.Second, 100, fake, quietLogger())
 	startBatcher(t, b)
 
 	// Wait several timeout intervals — if the batcher were going to fire on
@@ -180,7 +180,7 @@ func TestBatcher_DemuxesByRequestID(t *testing.T) {
 			return &pb.BatchResponse{Responses: resps}, nil
 		},
 	}
-	b := NewBatcher(3, time.Hour, 100, fake, quietLogger())
+	b := NewBatcher(3, time.Hour, 2*time.Second, 100, fake, quietLogger())
 	startBatcher(t, b)
 
 	reqs := []*PendingRequest{
@@ -211,7 +211,7 @@ func TestBatcher_WorkerErrorFansOut(t *testing.T) {
 			return nil, workerErr
 		},
 	}
-	b := NewBatcher(2, time.Hour, 100, fake, quietLogger())
+	b := NewBatcher(2, time.Hour, 2*time.Second, 100, fake, quietLogger())
 	startBatcher(t, b)
 
 	reqs := []*PendingRequest{
@@ -242,7 +242,7 @@ func TestBatcher_MissingResponseGetsError(t *testing.T) {
 			}, nil
 		},
 	}
-	b := NewBatcher(3, time.Hour, 100, fake, quietLogger())
+	b := NewBatcher(3, time.Hour, 2*time.Second, 100, fake, quietLogger())
 	startBatcher(t, b)
 
 	reqs := []*PendingRequest{
@@ -283,7 +283,7 @@ func TestBatcher_SubmitReturnsCtxErrOnCancel(t *testing.T) {
 			return &pb.BatchResponse{Responses: resps}, nil
 		},
 	}
-	b := NewBatcher(1, time.Hour, 100, fake, quietLogger())
+	b := NewBatcher(1, time.Hour, 2*time.Second, 100, fake, quietLogger())
 	startBatcher(t, b)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)

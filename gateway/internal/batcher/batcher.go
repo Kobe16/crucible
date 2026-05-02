@@ -20,22 +20,24 @@ type Inferrer interface {
 // maxBatchSize, or batchTimeout elapsing since the first request of the
 // current batch arrived.
 type Batcher struct {
-	queue        chan *PendingRequest
-	maxBatchSize int
-	batchTimeout time.Duration
-	inferrer     Inferrer
-	logger       *slog.Logger
+	queue             chan *PendingRequest
+	maxBatchSize      int
+	batchTimeout      time.Duration
+	inferenceDeadline time.Duration
+	inferrer          Inferrer
+	logger            *slog.Logger
 }
 
 // NewBatcher constructs a Batcher with a buffered queue sized to queueDepth.
 // Run must be called (typically in a goroutine) to start consuming the queue.
-func NewBatcher(maxBatchSize int, batchTimeout time.Duration, queueDepth int, inferrer Inferrer, logger *slog.Logger) *Batcher {
+func NewBatcher(maxBatchSize int, batchTimeout time.Duration, inferenceDeadline time.Duration, queueDepth int, inferrer Inferrer, logger *slog.Logger) *Batcher {
 	return &Batcher{
-		queue:        make(chan *PendingRequest, queueDepth),
-		maxBatchSize: maxBatchSize,
-		batchTimeout: batchTimeout,
-		inferrer:     inferrer,
-		logger:       logger,
+		queue:             make(chan *PendingRequest, queueDepth),
+		maxBatchSize:      maxBatchSize,
+		batchTimeout:      batchTimeout,
+		inferenceDeadline: inferenceDeadline,
+		inferrer:          inferrer,
+		logger:            logger,
 	}
 }
 
@@ -99,6 +101,7 @@ func (b *Batcher) Run(ctx context.Context) {
 		// Flush on timeout
 		case <-timerC:
 			go b.flush(ctx, batch)
+
 			batch = nil
 			timer = nil
 			timerC = nil
@@ -110,6 +113,9 @@ func (b *Batcher) Run(ctx context.Context) {
 // the worker, then demuxes the BatchResponse back to each request's
 // ResponseChan by request_id.
 func (b *Batcher) flush(ctx context.Context, batch []*PendingRequest) {
+	inferCtx, cancel := context.WithTimeout(ctx, b.inferenceDeadline)
+	defer cancel()
+
 	requests := make([]*pb.InferenceRequest, len(batch))
 	for i, req := range batch {
 		requests[i] = &pb.InferenceRequest{
@@ -119,7 +125,7 @@ func (b *Batcher) flush(ctx context.Context, batch []*PendingRequest) {
 		}
 	}
 
-	resp, err := b.inferrer.BatchInference(ctx, &pb.BatchRequest{Requests: requests})
+	resp, err := b.inferrer.BatchInference(inferCtx, &pb.BatchRequest{Requests: requests})
 	if err != nil {
 		for _, req := range batch {
 			req.ResponseChan <- Result{Err: err}
