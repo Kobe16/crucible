@@ -11,18 +11,25 @@ Client
   │
   │  HTTP POST /predict
   ▼
-┌─────────────────────┐
-│   Gateway (Go)      │  :8080
-│   net/http + zerolog│
-└─────────┬───────────┘
-          │  gRPC BatchInference RPC
-          ▼
-┌─────────────────────┐
-│   Worker (Python)   │  :50051
-│   PyTorch + gRPC    │
-│   DistilBERT SST-2  │
-└─────────────────────┘
+┌──────────────────────────────────┐
+│   Gateway (Go)             :8080 │
+│   ┌─────────┐    ┌─────────────┐ │
+│   │ Handler │ ─▶ │   Batcher   │ │  groups concurrent requests
+│   └─────────┘    └──────┬──────┘ │  by size or timeout
+└──────────────────────────┼───────┘
+                           │  gRPC BatchInference
+                           ▼
+                  ┌─────────────────────┐
+                  │   Worker (Python)   │  :50051
+                  │   PyTorch + gRPC    │
+                  │   DistilBERT SST-2  │
+                  └─────────────────────┘
 ```
+
+The gateway accepts one HTTP request per client, but groups concurrent requests
+into a single gRPC `BatchInference` call. A batch fires as soon as either
+`MAX_BATCH_SIZE` requests have accumulated or `BATCH_TIMEOUT_MS` has elapsed
+since the first request of the current batch arrived.
 
 ## Prerequisites
 
@@ -138,7 +145,10 @@ Both services are configured via environment variables, which can be overridden 
 |---|---|---|---|
 | `HTTP_PORT` | gateway | `8080` | Gateway listen port |
 | `WORKER_ADDR` | gateway | `worker:50051` | Worker gRPC address |
-| `LOG_LEVEL` | gateway | `info` | Zerolog level (debug/info/warn/error) |
+| `LOG_LEVEL` | gateway | `info` | Log level (debug/info/warn/error) |
+| `MAX_BATCH_SIZE` | gateway | `8` | Max requests per batch before flushing |
+| `BATCH_TIMEOUT_MS` | gateway | `50` | Max time (ms) to wait for a batch to fill before flushing |
+| `QUEUE_DEPTH` | gateway | `1000` | Maximum buffered requests in the batcher queue |
 | `GRPC_PORT` | worker | `50051` | Worker gRPC listen port |
 | `MAX_WORKERS` | worker | `4` | gRPC thread pool size |
 | `MODEL_NAME` | worker | `distilbert-base-uncased-finetuned-sst-2-english` | HuggingFace model to load |
@@ -148,15 +158,16 @@ Both services are configured via environment variables, which can be overridden 
 
 ```
 crucible/
-├── proto/                    # gRPC service definition (inference.proto)
-├── gateway/                  # Go HTTP→gRPC gateway
+├── proto/                       # gRPC service definition (inference.proto)
+├── gateway/                     # Go HTTP→gRPC gateway
 │   ├── go.mod
 │   ├── cmd/gateway/
-│   │   └── main.go           # Entry point: wire config → client → handler → HTTP server
+│   │   └── main.go              # Entry point: wires config → inference.Client → batcher → handler → HTTP server
 │   └── internal/
-│       ├── config/config.go  # Env var loading (WORKER_ADDR, HTTP_PORT, LOG_LEVEL)
-│       ├── worker/client.go  # gRPC connection wrapper (RunInference, CheckHealth, GetWorkerStatus)
-│       └── handler/handler.go # HTTP handlers (POST /predict, GET /health, GET /status)
+│       ├── config/config.go     # Env var loading (incl. MAX_BATCH_SIZE, BATCH_TIMEOUT_MS, QUEUE_DEPTH)
+│       ├── inference/client.go  # gRPC connection wrapper (BatchInference, CheckHealth, GetWorkerStatus)
+│       ├── batcher/             # Dynamic request batcher: queue + goroutine that flushes by size or timeout
+│       └── handler/handler.go   # HTTP handlers (POST /predict, GET /health, GET /status)
 ├── worker/                   # Python gRPC inference server
 │   ├── server.py             # Entry point (serve(), signal handling, model loading)
 │   ├── servicer.py           # gRPC servicer (RunInference, BatchInference, GetWorkerStatus)
