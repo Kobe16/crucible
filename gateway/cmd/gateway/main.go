@@ -17,7 +17,11 @@ import (
 
 // Main entry point for the gateway application. Initializes configuration, sets up gRPC client and HTTP server, and handles graceful shutdown.
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("invalid_config", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize slog with JSON output. Level defaults to INFO if LOG_LEVEL is unrecognized.
 	var level slog.Level

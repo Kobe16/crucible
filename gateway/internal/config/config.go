@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -18,16 +19,35 @@ type Config struct {
 }
 
 // Load reads environment variables and returns a populated Config struct.
-func Load() Config {
+// Returns an error if any numeric value would produce invalid batcher behaviour.
+func Load() (Config, error) {
+	maxBatchSize := getEnv("MAX_BATCH_SIZE", 8)
+	batchTimeoutMS := getEnv("BATCH_TIMEOUT_MS", 50)
+	inferenceDeadlineMS := getEnv("INFERENCE_DEADLINE_MS", 2000)
+	queueDepth := getEnv("QUEUE_DEPTH", 1000)
+
+	if maxBatchSize <= 0 {
+		return Config{}, fmt.Errorf("MAX_BATCH_SIZE must be positive, got %d", maxBatchSize)
+	}
+	if batchTimeoutMS <= 0 {
+		return Config{}, fmt.Errorf("BATCH_TIMEOUT_MS must be positive, got %d", batchTimeoutMS)
+	}
+	if inferenceDeadlineMS <= 0 {
+		return Config{}, fmt.Errorf("INFERENCE_DEADLINE_MS must be positive, got %d", inferenceDeadlineMS)
+	}
+	if queueDepth <= 0 {
+		return Config{}, fmt.Errorf("QUEUE_DEPTH must be positive, got %d", queueDepth)
+	}
+
 	return Config{
 		WorkerAddr:        getEnv("WORKER_ADDR", "worker:50051"),
 		HTTPPort:          getEnv("HTTP_PORT", "8080"),
 		LogLevel:          getEnv("LOG_LEVEL", "info"),
-		MaxBatchSize:      getEnv("MAX_BATCH_SIZE", 8),
-		BatchTimeout:      time.Duration(getEnv("BATCH_TIMEOUT_MS", 50)) * time.Millisecond,
-		InferenceDeadline: time.Duration(getEnv("INFERENCE_DEADLINE_MS", 2000)) * time.Millisecond,
-		QueueDepth:        getEnv("QUEUE_DEPTH", 1000),
-	}
+		MaxBatchSize:      maxBatchSize,
+		BatchTimeout:      time.Duration(batchTimeoutMS) * time.Millisecond,
+		InferenceDeadline: time.Duration(inferenceDeadlineMS) * time.Millisecond,
+		QueueDepth:        queueDepth,
+	}, nil
 }
 
 // getEnv returns the value of the environment variable specified by key,
