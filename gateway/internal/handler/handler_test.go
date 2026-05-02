@@ -15,6 +15,7 @@ import (
 
 	pb "github.com/Kobe16/crucible/gateway/gen/inference"
 	"github.com/Kobe16/crucible/gateway/internal/batcher"
+	"github.com/Kobe16/crucible/gateway/internal/cache"
 )
 
 // mockStatusProbe implements StatusProbe for testing.
@@ -152,7 +153,7 @@ func TestPredict(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := New(&mockStatusProbe{}, &mockPredictor{submitFn: tt.submitFn})
+			h := New(&mockStatusProbe{}, &mockPredictor{submitFn: tt.submitFn}, &cache.NoopCache{})
 
 			req := httptest.NewRequest(http.MethodPost, "/predict", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
@@ -207,7 +208,7 @@ func TestHealth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockStatusProbe{checkHealthFn: tt.healthFn}
-			h := New(mock, &mockPredictor{})
+			h := New(mock, &mockPredictor{}, &cache.NoopCache{})
 
 			req := httptest.NewRequest(http.MethodGet, "/health", nil)
 			rec := httptest.NewRecorder()
@@ -257,7 +258,7 @@ func TestStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &mockStatusProbe{getWorkerStatusFn: tt.statusFn}
-			h := New(mock, &mockPredictor{})
+			h := New(mock, &mockPredictor{}, &cache.NoopCache{})
 
 			req := httptest.NewRequest(http.MethodGet, "/status", nil)
 			rec := httptest.NewRecorder()
@@ -354,7 +355,7 @@ func TestStatusResponseJSON(t *testing.T) {
 			}, nil
 		},
 	}
-	h := New(mock, &mockPredictor{})
+	h := New(mock, &mockPredictor{}, &cache.NoopCache{})
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
 	rec := httptest.NewRecorder()
 	h.Status(rec, req)

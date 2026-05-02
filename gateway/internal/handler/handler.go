@@ -16,6 +16,7 @@ import (
 
 	pb "github.com/Kobe16/crucible/gateway/gen/inference"
 	"github.com/Kobe16/crucible/gateway/internal/batcher"
+	"github.com/Kobe16/crucible/gateway/internal/cache"
 )
 
 // requestIDKey is a context key for the per-request ID set by LoggingMiddleware.
@@ -69,10 +70,11 @@ type Predictor interface {
 type Handler struct {
 	probe     StatusProbe
 	predictor Predictor
+	cache     cache.Cache
 }
 
-func New(probe StatusProbe, predictor Predictor) *Handler {
-	return &Handler{probe: probe, predictor: predictor}
+func New(probe StatusProbe, predictor Predictor, c cache.Cache) *Handler {
+	return &Handler{probe: probe, predictor: predictor, cache: c}
 }
 
 // predictRequest is the expected JSON body for a prediction request.
@@ -126,6 +128,16 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 		requestID = newRequestID()
 	}
 
+	// Check cache before submitting to batcher.
+	cacheKey := cache.CacheKey(req.Input, req.Parameters)
+	if cached, ok := h.cache.Get(cacheKey); ok {
+		writeJSON(w, http.StatusOK, predictResponse{
+			RequestID: requestID,
+			Output:    cached,
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -141,8 +153,9 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 
 	result := h.predictor.Submit(pending)
 
-	// Request succeeded
+	// Request succeeded — store in cache for future lookups.
 	if result.Err == nil {
+		h.cache.Set(cacheKey, result.Output, 5*time.Minute)
 		writeJSON(w, http.StatusOK, predictResponse{
 			RequestID: requestID,
 			Output:    result.Output,
