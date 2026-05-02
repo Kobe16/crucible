@@ -147,10 +147,17 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Context error occurred (i.e, 10s timeout fired, HTTP client disconnected)
-	if errors.Is(result.Err, context.DeadlineExceeded) || errors.Is(result.Err, context.Canceled) {
+	// Context error occurred (10s timeout fired)
+	if errors.Is(result.Err, context.DeadlineExceeded) {
 		slog.ErrorContext(r.Context(), "request_timeout", "error", result.Err, "request_id", requestID)
 		writeJSON(w, http.StatusGatewayTimeout, errorResponse{Error: "request timed out"})
+		return
+	}
+
+	// Request got cancelled
+	if errors.Is(result.Err, context.Canceled) {
+		slog.InfoContext(r.Context(), "request_cancelled", "request_id", requestID)
+		writeJSON(w, 499, errorResponse{Error: "request cancelled"})
 		return
 	}
 
