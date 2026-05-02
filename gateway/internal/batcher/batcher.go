@@ -71,6 +71,13 @@ func (b *Batcher) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Flush any partial batch on shutdown so waiting handlers aren't stranded.
+			// ctx is already cancelled, so use a fresh context bounded by inferenceDeadline.
+			if len(batch) > 0 {
+				flushCtx, cancel := context.WithTimeout(context.Background(), b.inferenceDeadline)
+				defer cancel()
+				b.flush(flushCtx, batch)
+			}
 			return
 
 		case req := <-b.queue:
