@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Kobe16/crucible/gateway/internal/batcher"
+	"github.com/Kobe16/crucible/gateway/internal/cache"
 	"github.com/Kobe16/crucible/gateway/internal/config"
 	"github.com/Kobe16/crucible/gateway/internal/handler"
 	"github.com/Kobe16/crucible/gateway/internal/inference"
@@ -57,7 +58,7 @@ func main() {
 	}()
 
 	// Setup HTTP server. inference.Client satisfies handler.StatusProbe; the batcher satisfies handler.Predictor.
-	h := handler.New(client, b)
+	h := handler.New(client, b, &cache.NoopCache{})
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /predict", h.Predict)
 	mux.HandleFunc("GET /health", h.Health)
