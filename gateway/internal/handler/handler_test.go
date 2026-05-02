@@ -14,50 +14,57 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/Kobe16/crucible/gateway/gen/inference"
+	"github.com/Kobe16/crucible/gateway/internal/batcher"
 )
 
-// mockWorkerClient implements WorkerClient for testing.
-type mockWorkerClient struct {
-	inferFn           func(ctx context.Context, requestID, input string, params map[string]string) (string, error)
+// mockStatusProbe implements StatusProbe for testing.
+type mockStatusProbe struct {
 	checkHealthFn     func(ctx context.Context) (*healthpb.HealthCheckResponse, error)
 	getWorkerStatusFn func(ctx context.Context) (*pb.WorkerStatusResponse, error)
 }
 
-func (m *mockWorkerClient) Infer(ctx context.Context, requestID, input string, params map[string]string) (string, error) {
-	if m.inferFn != nil {
-		return m.inferFn(ctx, requestID, input, params)
-	}
-	return "", nil
-}
-
-func (m *mockWorkerClient) CheckHealth(ctx context.Context) (*healthpb.HealthCheckResponse, error) {
+func (m *mockStatusProbe) CheckHealth(ctx context.Context) (*healthpb.HealthCheckResponse, error) {
 	if m.checkHealthFn != nil {
 		return m.checkHealthFn(ctx)
 	}
 	return nil, nil
 }
 
-func (m *mockWorkerClient) GetWorkerStatus(ctx context.Context) (*pb.WorkerStatusResponse, error) {
+func (m *mockStatusProbe) GetWorkerStatus(ctx context.Context) (*pb.WorkerStatusResponse, error) {
 	if m.getWorkerStatusFn != nil {
 		return m.getWorkerStatusFn(ctx)
 	}
 	return nil, nil
 }
 
-// TestPredict tests the Predict handler (/predict endpoint) with various scenarios, including valid requests, error handling, and parameter passing.
+// mockPredictor implements Predictor for testing.
+type mockPredictor struct {
+	submitFn func(req *batcher.PendingRequest) batcher.Result
+}
+
+func (m *mockPredictor) Submit(req *batcher.PendingRequest) batcher.Result {
+	if m.submitFn != nil {
+		return m.submitFn(req)
+	}
+	return batcher.Result{}
+}
+
+// TestPredict tests the Predict handler (/predict endpoint) by driving the
+// prediction path through a mock Predictor. Validation errors short-circuit
+// before Submit, so those test cases leave submitFn nil.
 func TestPredict(t *testing.T) {
 	tests := []struct {
 		name       string
 		body       string
-		inferFn    func(ctx context.Context, requestID, input string, params map[string]string) (string, error)
+		submitFn   func(req *batcher.PendingRequest) batcher.Result
 		wantStatus int
 		wantBody   string // substring match
 	}{
 		{
 			name: "valid request",
 			body: `{"input":"hello world"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "POSITIVE (0.9500)", nil
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Output: "POSITIVE (0.9500)"}
 			},
 			wantStatus: http.StatusOK,
 			wantBody:   `"output":"POSITIVE (0.9500)"`,
@@ -65,11 +72,11 @@ func TestPredict(t *testing.T) {
 		{
 			name: "valid request with parameters",
 			body: `{"input":"hello","parameters":{"temp":"0.7"}}`,
-			inferFn: func(_ context.Context, _, _ string, params map[string]string) (string, error) {
-				if params["temp"] != "0.7" {
-					t.Errorf("expected temp=0.7, got %s", params["temp"])
+			submitFn: func(req *batcher.PendingRequest) batcher.Result {
+				if req.Parameters["temp"] != "0.7" {
+					t.Errorf("expected temp=0.7, got %s", req.Parameters["temp"])
 				}
-				return "ok", nil
+				return batcher.Result{Output: "ok"}
 			},
 			wantStatus: http.StatusOK,
 			wantBody:   `"output":"ok"`,
@@ -95,41 +102,57 @@ func TestPredict(t *testing.T) {
 		{
 			name: "worker unavailable",
 			body: `{"input":"test"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "", status.Error(codes.Unavailable, "connection refused")
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: status.Error(codes.Unavailable, "connection refused")}
 			},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			name: "worker internal error",
 			body: `{"input":"test"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "", status.Error(codes.Internal, "inference failed")
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: status.Error(codes.Internal, "inference failed")}
 			},
 			wantStatus: http.StatusBadGateway,
 		},
 		{
-			name: "worker deadline exceeded",
+			name: "worker deadline exceeded (gRPC)",
 			body: `{"input":"test"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "", status.Error(codes.DeadlineExceeded, "timeout")
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: status.Error(codes.DeadlineExceeded, "timeout")}
 			},
 			wantStatus: http.StatusGatewayTimeout,
 		},
 		{
 			name: "worker invalid argument",
 			body: `{"input":"test"}`,
-			inferFn: func(_ context.Context, _, _ string, _ map[string]string) (string, error) {
-				return "", status.Error(codes.InvalidArgument, "bad input")
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: status.Error(codes.InvalidArgument, "bad input")}
 			},
 			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "request context deadline exceeded",
+			body: `{"input":"test"}`,
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: context.DeadlineExceeded}
+			},
+			wantStatus: http.StatusGatewayTimeout,
+			wantBody:   `"request timed out"`,
+		},
+		{
+			name: "missing response from worker",
+			body: `{"input":"test"}`,
+			submitFn: func(_ *batcher.PendingRequest) batcher.Result {
+				return batcher.Result{Err: errors.New("worker did not return a response for request abc")}
+			},
+			wantStatus: http.StatusInternalServerError,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockWorkerClient{inferFn: tt.inferFn}
-			h := New(mock)
+			h := New(&mockStatusProbe{}, &mockPredictor{submitFn: tt.submitFn})
 
 			req := httptest.NewRequest(http.MethodPost, "/predict", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
@@ -183,8 +206,8 @@ func TestHealth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockWorkerClient{checkHealthFn: tt.healthFn}
-			h := New(mock)
+			mock := &mockStatusProbe{checkHealthFn: tt.healthFn}
+			h := New(mock, &mockPredictor{})
 
 			req := httptest.NewRequest(http.MethodGet, "/health", nil)
 			rec := httptest.NewRecorder()
@@ -233,8 +256,8 @@ func TestStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &mockWorkerClient{getWorkerStatusFn: tt.statusFn}
-			h := New(mock)
+			mock := &mockStatusProbe{getWorkerStatusFn: tt.statusFn}
+			h := New(mock, &mockPredictor{})
 
 			req := httptest.NewRequest(http.MethodGet, "/status", nil)
 			rec := httptest.NewRecorder()
@@ -322,7 +345,7 @@ func TestNewRequestID(t *testing.T) {
 // TestStatusResponseJSON tests the JSON encoding of the status response from the /status endpoint.
 func TestStatusResponseJSON(t *testing.T) {
 	// Verify the status endpoint returns correct numeric fields
-	mock := &mockWorkerClient{
+	mock := &mockStatusProbe{
 		getWorkerStatusFn: func(_ context.Context) (*pb.WorkerStatusResponse, error) {
 			return &pb.WorkerStatusResponse{
 				Status:          pb.ServingStatus_SERVING_STATUS_OK,
@@ -331,7 +354,7 @@ func TestStatusResponseJSON(t *testing.T) {
 			}, nil
 		},
 	}
-	h := New(mock)
+	h := New(mock, &mockPredictor{})
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
 	rec := httptest.NewRecorder()
 	h.Status(rec, req)

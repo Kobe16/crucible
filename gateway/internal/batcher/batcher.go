@@ -1,0 +1,169 @@
+package batcher
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	pb "github.com/Kobe16/crucible/gateway/gen/inference"
+)
+
+// Inferrer is the narrow worker-facing dependency the batcher needs.
+// inference.Client satisfies this interface.
+type Inferrer interface {
+	BatchInference(ctx context.Context, req *pb.BatchRequest) (*pb.BatchResponse, error)
+}
+
+// Batcher collects PendingRequests off a queue and dispatches them to the
+// worker in batches, firing on whichever happens first: the batch reaching
+// maxBatchSize, or batchTimeout elapsing since the first request of the
+// current batch arrived.
+type Batcher struct {
+	queue             chan *PendingRequest
+	maxBatchSize      int
+	batchTimeout      time.Duration
+	inferenceDeadline time.Duration
+	inferrer          Inferrer
+	logger            *slog.Logger
+}
+
+// NewBatcher constructs a Batcher with a buffered queue sized to queueDepth.
+// Run must be called (typically in a goroutine) to start consuming the queue.
+func NewBatcher(maxBatchSize int, batchTimeout time.Duration, inferenceDeadline time.Duration, queueDepth int, inferrer Inferrer, logger *slog.Logger) *Batcher {
+	return &Batcher{
+		queue:             make(chan *PendingRequest, queueDepth),
+		maxBatchSize:      maxBatchSize,
+		batchTimeout:      batchTimeout,
+		inferenceDeadline: inferenceDeadline,
+		inferrer:          inferrer,
+		logger:            logger,
+	}
+}
+
+// Submit enqueues a PendingRequest and blocks until the batcher returns a
+// Result or the request's context is cancelled. Returns ErrQueueFull
+// immediately if the queue is at capacity (caller should respond with 503),
+// or the context error if the request is cancelled or times out before a
+// result arrives.
+func (b *Batcher) Submit(req *PendingRequest) Result {
+	select {
+	case b.queue <- req:
+	case <-req.Ctx.Done():
+		return Result{Err: req.Ctx.Err()}
+	default:
+		return Result{Err: ErrQueueFull}
+	}
+
+	select {
+	case result := <-req.ResponseChan:
+		return result
+
+	case <-req.Ctx.Done():
+		return Result{Err: req.Ctx.Err()}
+	}
+}
+
+// Run is the batcher's goroutine loop. It selects on the queue and a per-batch
+// timer, flushing whenever the batch hits maxBatchSize or the timer fires.
+// Returns when ctx is cancelled.
+func (b *Batcher) Run(ctx context.Context) {
+	var batch []*PendingRequest
+	var timer *time.Timer
+	var timerC <-chan time.Time // nil when no timer is running
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Flush any partial batch on shutdown so waiting handlers aren't stranded.
+			// ctx is already cancelled, so use a fresh context bounded by inferenceDeadline.
+			if len(batch) > 0 {
+				flushCtx, cancel := context.WithTimeout(context.Background(), b.inferenceDeadline)
+				defer cancel()
+				b.flush(flushCtx, batch)
+			}
+			return
+
+		case req := <-b.queue:
+			batch = append(batch, req)
+
+			// Start a timer on the first request of a new batch
+			if len(batch) == 1 {
+				timer = time.NewTimer(b.batchTimeout)
+				timerC = timer.C
+			}
+
+			// Flush on size
+			if len(batch) >= b.maxBatchSize {
+				// stop the timer; if it already fired, drain the buffered tick so it doesn't leak into the next batch
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+
+				go b.flush(ctx, batch)
+				batch = nil
+				timer = nil
+				timerC = nil
+			}
+
+		// Flush on timeout
+		case <-timerC:
+			go b.flush(ctx, batch)
+
+			batch = nil
+			timer = nil
+			timerC = nil
+		}
+	}
+}
+
+// flush builds a BatchRequest from the collected PendingRequests, sends it to
+// the worker, then demuxes the BatchResponse back to each request's
+// ResponseChan by request_id.
+func (b *Batcher) flush(ctx context.Context, batch []*PendingRequest) {
+	inferCtx, cancel := context.WithTimeout(ctx, b.inferenceDeadline)
+	defer cancel()
+
+	requests := make([]*pb.InferenceRequest, len(batch))
+	for i, req := range batch {
+		requests[i] = &pb.InferenceRequest{
+			RequestId:  req.RequestID,
+			Input:      req.Input,
+			Parameters: req.Parameters,
+		}
+	}
+
+	resp, err := b.inferrer.BatchInference(inferCtx, &pb.BatchRequest{Requests: requests})
+	if err != nil {
+		for _, req := range batch {
+			req.ResponseChan <- Result{Err: err}
+		}
+		return
+	}
+
+	// Build map of pending requests keyed by RequestID for fast lookup
+	pendingByID := make(map[string]*PendingRequest, len(batch))
+	for _, req := range batch {
+		pendingByID[req.RequestID] = req
+	}
+
+	// Delete requests from map as you return their responses
+	for _, response := range resp.Responses {
+		if req, ok := pendingByID[response.RequestId]; ok {
+			req.ResponseChan <- Result{Output: response.Output}
+			delete(pendingByID, response.RequestId)
+		} else {
+			b.logger.Warn("unknown_response_id", "request_id", response.RequestId)
+		}
+	}
+
+	// For requests that didn't get a response, send an error
+	for _, req := range pendingByID {
+		req.ResponseChan <- Result{
+			Err: fmt.Errorf("worker did not return a response for request %s", req.RequestID),
+		}
+	}
+}

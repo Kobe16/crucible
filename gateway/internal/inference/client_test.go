@@ -77,34 +77,29 @@ func newTestClient(t *testing.T, fake *fakeInferenceServer, healthServing bool) 
 	}
 }
 
-// TestInfer tests the Infer method of the Client with various scenarios, including successful inference, empty response, and server error.
-func TestInfer(t *testing.T) {
+// TestBatchInference verifies that BatchInference forwards a batch to the worker
+// and returns the response unchanged. The batcher (not this method) is responsible
+// for shaping inputs and demuxing outputs, so this test only checks pass-through.
+func TestBatchInference(t *testing.T) {
 	tests := []struct {
-		name    string
-		batchFn func(context.Context, *pb.BatchRequest) (*pb.BatchResponse, error)
-		wantOut string
-		wantErr bool
+		name     string
+		batchFn  func(context.Context, *pb.BatchRequest) (*pb.BatchResponse, error)
+		wantOuts []string
+		wantErr  bool
 	}{
 		{
-			name: "success",
+			name: "multi-request batch",
 			batchFn: func(_ context.Context, req *pb.BatchRequest) (*pb.BatchResponse, error) {
-				return &pb.BatchResponse{
-					Responses: []*pb.InferenceResponse{
-						{RequestId: req.Requests[0].RequestId, Output: "POSITIVE (0.95)"},
-					},
-				}, nil
+				resps := make([]*pb.InferenceResponse, len(req.Requests))
+				for i, r := range req.Requests {
+					resps[i] = &pb.InferenceResponse{RequestId: r.RequestId, Output: "out-" + r.RequestId}
+				}
+				return &pb.BatchResponse{Responses: resps}, nil
 			},
-			wantOut: "POSITIVE (0.95)",
+			wantOuts: []string{"out-a", "out-b", "out-c"},
 		},
 		{
-			name: "empty response",
-			batchFn: func(_ context.Context, _ *pb.BatchRequest) (*pb.BatchResponse, error) {
-				return &pb.BatchResponse{}, nil
-			},
-			wantErr: true,
-		},
-		{
-			name: "server error",
+			name: "server error propagates",
 			batchFn: func(_ context.Context, _ *pb.BatchRequest) (*pb.BatchResponse, error) {
 				return nil, status.Error(codes.Unavailable, "worker down")
 			},
@@ -117,7 +112,15 @@ func TestInfer(t *testing.T) {
 			fake := &fakeInferenceServer{batchFn: tt.batchFn}
 			client := newTestClient(t, fake, true)
 
-			out, err := client.Infer(context.Background(), "req-1", "hello", nil)
+			req := &pb.BatchRequest{
+				Requests: []*pb.InferenceRequest{
+					{RequestId: "a", Input: "hello"},
+					{RequestId: "b", Input: "world"},
+					{RequestId: "c", Input: "!"},
+				},
+			}
+
+			resp, err := client.BatchInference(context.Background(), req)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -127,8 +130,13 @@ func TestInfer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if out != tt.wantOut {
-				t.Errorf("output = %q, want %q", out, tt.wantOut)
+			if len(resp.Responses) != len(tt.wantOuts) {
+				t.Fatalf("got %d responses, want %d", len(resp.Responses), len(tt.wantOuts))
+			}
+			for i, want := range tt.wantOuts {
+				if resp.Responses[i].Output != want {
+					t.Errorf("responses[%d].Output = %q, want %q", i, resp.Responses[i].Output, want)
+				}
 			}
 		})
 	}
