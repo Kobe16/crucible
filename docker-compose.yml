@@ -52,6 +52,9 @@ services:
       WORKER_ADDR: "worker:50051"
       HTTP_PORT: "8080"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MAX_BATCH_SIZE: ${MAX_BATCH_SIZE:-8}
+      BATCH_TIMEOUT_MS: ${BATCH_TIMEOUT_MS:-50}
+      QUEUE_DEPTH: ${QUEUE_DEPTH:-1000}
     depends_on:
       worker:
         condition: service_healthy
