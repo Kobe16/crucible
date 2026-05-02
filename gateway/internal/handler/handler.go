@@ -122,6 +122,9 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 
 	// Retrieve the request ID set by LoggingMiddleware (falls back to empty string if middleware not used).
 	requestID, _ := r.Context().Value(requestIDKey{}).(string)
+	if requestID == "" {
+		requestID = newRequestID()
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
