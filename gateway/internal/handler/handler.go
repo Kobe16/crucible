@@ -151,6 +151,12 @@ func (h *Handler) Predict(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Context error occurred (10s timeout fired)
+	if errors.Is(result.Err, batcher.ErrQueueFull) {
+		slog.WarnContext(r.Context(), "queue_full", "request_id", requestID)
+		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "server too busy"})
+		return
+	}
+
 	if errors.Is(result.Err, context.DeadlineExceeded) {
 		slog.ErrorContext(r.Context(), "request_timeout", "error", result.Err, "request_id", requestID)
 		writeJSON(w, http.StatusGatewayTimeout, errorResponse{Error: "request timed out"})
