@@ -124,6 +124,12 @@ func (b *Batcher) Run(ctx context.Context) {
 // the worker, then demuxes the BatchResponse back to each request's
 // ResponseChan by request_id.
 func (b *Batcher) flush(ctx context.Context, batch []*PendingRequest) {
+	b.logger.Info("batch_flush",
+		"batch_size", len(batch),
+		"max_batch_size", b.maxBatchSize,
+		"fullness_ratio", float64(len(batch))/float64(b.maxBatchSize),
+	)
+
 	inferCtx, cancel := context.WithTimeout(ctx, b.inferenceDeadline)
 	defer cancel()
 
